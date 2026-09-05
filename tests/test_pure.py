@@ -267,5 +267,55 @@ class TestCosts(unittest.TestCase):
         self.assertLess(pnl, 0)  # 500仓位涨1%=5元利润 < 10.25成本
 
 
+class TestMorningConfirm(unittest.TestCase):
+    """morning_confirm 三层过滤：gap / buy_range / 成交可行性"""
+
+    def _cfg(self):
+        cfg = {**CFG, "strategy": {**CFG["strategy"], "final_picks": 2,
+                                   "min_turnover_rate": 5.0, "max_turnover_rate": 25.0,
+                                   "wide_turnover_factor": 1.6}}
+        cfg["_risk"] = make_rules()  # main 里由 cfg["_risk"] 注入
+        return cfg
+
+    def _cand(self, price=10.0):
+        return {"code": "600001", "name": "测试", "board": "机器人", "kind": "主线首板",
+                "streak": 1, "stop_loss": 9.5, "buy_range": [9.8, 10.2]}
+
+    def test_buy_range_rejects_out_of_range(self):
+        """竞价+6%超出±2%计划区间：计划已失效，不买"""
+        from strategy import morning_confirm
+        snap = {"600001": make_stock("600001", 6, 10.6, 10.7)}
+        plan, rejected = morning_confirm([self._cand()], snap, self._cfg())
+        self.assertEqual(plan, [])
+        self.assertIn("超出计划区间", rejected[0][1])
+
+    def test_buy_range_accepts_in_range(self):
+        from strategy import morning_confirm
+        snap = {"600001": make_stock("600001", 1, 10.1, 10.2)}
+        plan, _ = morning_confirm([self._cand()], snap, self._cfg())
+        self.assertEqual(len(plan), 1)
+        self.assertEqual(plan[0]["open_price"], 10.1)
+
+    def test_unfillable_opening_limit(self):
+        """09:31整分钟封死涨停（low=high）：标记unfillable，虚拟盘取消"""
+        from strategy import morning_confirm
+        snap = {"600001": make_stock("600001", 3, 10.3, 10.3)}
+        fm = {"600001": {"open": 11.0, "high": 11.0, "low": 11.0, "close": 11.0}}
+        cand = self._cand()
+        cand["buy_range"] = [9.8, 11.5]  # 放宽区间让gap检查通过
+        plan, _ = morning_confirm([cand], snap, self._cfg(), fm)
+        self.assertTrue(plan[0].get("unfillable"))
+
+    def test_fillable_with_intraday_range(self):
+        """09:31有成交间隙（low<high）：正常可买"""
+        from strategy import morning_confirm
+        snap = {"600001": make_stock("600001", 3, 10.3, 10.4)}
+        fm = {"600001": {"open": 10.3, "high": 10.5, "low": 10.2, "close": 10.4}}
+        cand = self._cand()
+        cand["buy_range"] = [9.8, 10.6]
+        plan, _ = morning_confirm([cand], snap, self._cfg(), fm)
+        self.assertFalse(plan[0].get("unfillable", False))
+
+
 if __name__ == "__main__":
     unittest.main()

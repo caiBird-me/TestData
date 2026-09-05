@@ -136,6 +136,15 @@ class Portfolio:
                 break
             if p["code"] in held:
                 continue
+            # 成交可行性：秒板/快速封板的票真人买不进，虚拟盘按可成交处理
+            # 会造成"赢家买不进虚拟盘却买进了"的系统性正向偏差
+            if p.get("unfillable"):
+                for s in self.signals:
+                    if s["code"] == p["code"] and s["status"] == "pending":
+                        s.update({"status": "cancelled",
+                                  "reason": p.get("unfillable_reason", "无法成交")})
+                        break
+                continue
             pos = self.buy(p["code"], p["name"], p["open_price"], p["shares"],
                            p["board"], p["kind"], p.get("stop_loss", 0), date_str)
             if not pos:

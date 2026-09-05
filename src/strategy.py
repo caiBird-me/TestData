@@ -167,12 +167,20 @@ def _make_pick(stock, kind, streak, score, board, cfg):
 
 # ---------- 早间确认 ----------
 
-def morning_confirm(candidates, snapshot, cfg):
+def morning_confirm(candidates, snapshot, cfg, first_minutes=None):
     """早间竞价确认：对晚间候选池做开盘过滤。
 
     candidates: 昨晚的候选列表
     snapshot: fetch_snapshot_by_codes 的实时行情 {code: stock}
+    first_minutes: {code: 09:31分钟K} 成交可行性校验用（可选，无则跳过）
     返回 (最终作战计划, 被拒列表)
+
+    三层过滤：
+    1. gap 过滤（低开<-2% / 高开>7%）
+    2. buy_range 校验：竞价价必须落在晚间计划的买入区间内（±2%），
+       否则"计划说不买但虚拟盘买了"——推荐与执行脱节
+    3. 成交可行性：09:31 已封涨停的票（秒板/快速封板）标记 unfillable，
+       虚拟盘取消成交——"赢家买不进，输家随便买"是系统性正向偏差
     """
     st = cfg["strategy"]
     rk = cfg.get("_risk")
@@ -191,11 +199,17 @@ def morning_confirm(candidates, snapshot, cfg):
             if not rk.affordable(s["price"]):
                 rejected.append((c, f"价格{s['price']}元超出仓位可承受范围"))
                 continue
+        # buy_range 校验：竞价价超出晚间计划区间 → 计划已失效，不追
+        low, high = c.get("buy_range") or (0, 0)
+        if low and high and not (low <= s["price"] <= high):
+            rejected.append((c, f"竞价价{s['price']:.2f}元超出计划区间{low:.2f}~{high:.2f}元"))
+            continue
         shares, amount = rk.calc_shares(s["price"]) if rk else (0, 0)
         if shares <= 0:
             rejected.append((c, f"价格{s['price']}元太贵，一手需{s['price']*100:.0f}元"))
             continue
-        result.append({
+
+        pick = {
             **{k: c[k] for k in ("code", "name", "board", "kind", "streak",
                                   "stop_loss", "buy_range")},
             "open_price": s["price"],
@@ -203,9 +217,20 @@ def morning_confirm(candidates, snapshot, cfg):
             if s["pre_close"] > 0 else 0,
             "shares": shares,
             "amount": round(amount, 0),
-            "action": f"竞价后若延续强势，{s['price']:.2f}元附近买入 {shares} 股（约{amount:.0f}元），"
-                      f"止损 {c['stop_loss']} 元",
-        })
+        }
+
+        # 成交可行性：09:31分钟K若整根封死涨停（low=high=涨停价），
+        # 开盘瞬间已封板，真人挂单排队未必成交 → 虚拟盘也不买
+        fm = (first_minutes or {}).get(c["code"])
+        if fm and fm["low"] >= fm["high"] - 0.01 and fm["close"] >= fm["open"]:
+            pct = (fm["close"] - s["pre_close"]) / s["pre_close"] * 100 if s["pre_close"] else 0
+            if pct >= limit_up_pct(s) - 0.3:
+                pick["unfillable"] = True
+                pick["unfillable_reason"] = f"开盘即封板（09:31整分钟无成交间隙），排队未必成交"
+
+        pick["action"] = (f"竞价后若延续强势，{s['price']:.2f}元附近买入 {shares} 股"
+                          f"（约{amount:.0f}元），止损 {c['stop_loss']} 元")
+        result.append(pick)
 
     # 连板核心优先于首板/突破（同分时高度优先）
     result.sort(key=lambda r: (r.get("streak", 1) >= 2, r.get("streak", 1)), reverse=True)

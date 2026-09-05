@@ -54,7 +54,7 @@ def run_evening(cfg):
             return 0
 
     print(f"[evening] 拉取全市场涨幅榜 ...")
-    stocks = ds.fetch_top_gainers(cfg["strategy"]["top_gainers_pages"])
+    stocks, raw_pages = ds.fetch_top_gainers(cfg["strategy"]["top_gainers_pages"], keep_raw=True)
     if not stocks:
         notify.send(cfg, "收盘复盘失败", "行情数据拉取失败，请手动检查")
         return 1
@@ -75,8 +75,8 @@ def run_evening(cfg):
         sold = [r for r in settlements if r["action"] == "sell"]
         print(f"[evening] 结算: 卖出{len(sold)}笔，继续持有{len(settlements)-len(sold)}笔")
 
-    # ---------- 2. 归档 + 连板计算（K线校验防归档缺失虚增） ----------
-    ds.save_daily_archive(stocks)
+    # ---------- 2. 归档（含原始数据，口径漂移后可重算）+ 连板计算 ----------
+    ds.save_daily_archive(stocks, raw_pages)
     prev = ds.load_prev_limit_ups()
     streak = ds.calc_streak_codes(limit_ups, prev)
     streak = ds.verify_streaks(limit_ups, streak)
@@ -130,10 +130,12 @@ def run_morning(cfg):
 
     # 信号过期检查：信号次日有效，过时不候。
     # 昨晚的信号 signal_date 必须等于最近一个已收盘交易日（今晨盘前日K最后一根）
+    # 注意格式：signal_date 是 "YYYY-MM-DD"，日K返回 "YYYYMMDD"，需归一化后比较
     kline_last = ds.get_kline_last_date()
     expired = []
     if kline_last:
-        expired = [s for s in pending if s["signal_date"] != kline_last]
+        expired = [s for s in pending
+                   if s["signal_date"].replace("-", "") != kline_last]
         for s in expired:
             s["status"] = "cancelled"
             s["reason"] = "信号过期（非次日，作废）"
@@ -152,6 +154,16 @@ def run_morning(cfg):
     # 持仓也要拉行情：竞价时点处理昨日买入的票（T+1今日可卖）
     held_codes = list(portfolio.held_codes())
     snapshot = ds.fetch_snapshot_by_codes(list(set(codes) | set(held_codes)))
+
+    # 成交可行性：拉当日09:31分钟K（开盘后第一分钟的真实成交区间）。
+    # 注意 morning 运行在09:27时当日分钟K尚不存在——分钟K校验仅在
+    # 09:31后有效；09:27运行时跳过（此时买涨停板排队逻辑由人工判断）
+    first_minutes = {}
+    if now_cn().hour * 60 + now_cn().minute >= 9 * 60 + 31:
+        for c in codes:
+            fm = ds.fetch_first_minute(c)
+            if fm:
+                first_minutes[c] = fm
 
     # ---------- 持仓竞价处理（在买入之前，卖出释放的资金当日可用） ----------
     # a) 竞价跌破止损价 → 竞价卖出（不等收盘：盘中跌停当日-10%，收盘才检查会深亏）
@@ -194,7 +206,16 @@ def run_morning(cfg):
         for s in pending
     ]
 
-    plan, rejected = strategy.morning_confirm(candidates, snapshot, cfg)
+    plan, rejected = strategy.morning_confirm(candidates, snapshot, cfg, first_minutes)
+
+    # 成交价修正：竞价价是虚拟撮合价，真实成交发生在09:30后。
+    # 有09:31分钟K时用其均价+固定滑点0.3%（保守口径），消除竞价→开盘的正向偏差
+    slippage = cfg["strategy"].get("slippage_pct", 0.003)
+    for p in plan:
+        fm = first_minutes.get(p["code"])
+        if fm:
+            avg = (fm["open"] + fm["high"] + fm["low"] + fm["close"]) / 4
+            p["open_price"] = round(avg * (1 + slippage), 2)
 
     # 虚拟盘只买作战计划通过的票：按计划股数、守 max_stocks 上限
     if not pause and not sentiment_bad:

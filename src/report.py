@@ -114,6 +114,12 @@ def morning_report(date_str, plan, rejected, risk_rules, pause,
     else:
         lines.append("**📌 操作指令（按优先级）**")
         for i, p in enumerate(plan, 1):
+            if p.get("unfillable"):
+                lines.append(
+                    f"{i}. ~~{p['name']}({p['code']})~~ ⛔ {p['unfillable_reason']}"
+                    " —— 虚拟盘已取消，实盘请勿追"
+                )
+                continue
             lines.append(
                 f"{i}. **{p['name']}({p['code']})** [{p['kind']}"
                 + (f"/{p['streak']}板" if p["streak"] > 1 else "") + "] "

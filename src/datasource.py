@@ -48,10 +48,12 @@ HISTORY_DIR = DATA_DIR / "history"
 
 def _get(url, params, retries=4, timeout=15):
     """带重试的 GET，返回 JSON 的 data 部分，失败返回 None"""
-    # push2 直连失败时自动换 push2delay
+    # 域名容错：push2/push2his 在部分网络环境下会被直接断连，
+    # push2delay（延迟15秒，对收盘后分析无影响）在各环境均稳定
     urls = [url]
-    if "push2.eastmoney.com" in url:
-        urls.append(url.replace("push2.eastmoney.com", "push2delay.eastmoney.com"))
+    for host in ("push2.eastmoney.com", "push2his.eastmoney.com"):
+        if host in url:
+            urls.append(url.replace(host, "push2delay.eastmoney.com"))
     for i in range(retries):
         for u in urls:
             try:
@@ -68,9 +70,13 @@ def _get(url, params, retries=4, timeout=15):
     return None
 
 
-def fetch_top_gainers(pages=4, page_size=100):
-    """拉取全市场按涨幅降序的前 N 页股票快照（含实时行情字段）"""
-    stocks = []
+def fetch_top_gainers(pages=4, page_size=100, keep_raw=False):
+    """拉取全市场按涨幅降序的前 N 页股票快照（含实时行情字段）。
+
+    keep_raw=True 时额外返回原始响应（存档用，含全部原始字段——
+    字段口径变化后历史数据仍可重算）。
+    """
+    stocks, raw_pages = [], []
     for pn in range(1, pages + 1):
         data = _get(
             "https://push2.eastmoney.com/api/qt/clist/get",
@@ -84,7 +90,29 @@ def fetch_top_gainers(pages=4, page_size=100):
         if not data or not data.get("diff"):
             break
         stocks.extend(data["diff"])
-    return [_normalize_stock(s) for s in stocks if _normalize_stock(s)]
+        if keep_raw:
+            raw_pages.append(data)
+    normalized = [_normalize_stock(s) for s in stocks if _normalize_stock(s)]
+    # 结构漂移检测：关键字段大面积缺失说明东财改了字段名——
+    # 静默置0会让候选池悄悄消失，必须显式告警
+    _check_field_drift(normalized, stocks)
+    return (normalized, raw_pages) if keep_raw else normalized
+
+
+def _check_field_drift(normalized, raw_stocks):
+    """检测关键字段是否大面积缺失（数据源结构漂移的信号）"""
+    if not normalized:
+        return
+    n = len(normalized)
+    zero_turnover = sum(1 for s in normalized if s["turnover"] == 0.0)
+    zero_inflow = sum(1 for s in normalized if s["main_inflow"] == 0.0)
+    # 涨幅榜前400只的换手率不可能大面积为0；主力净流入恰好为0也罕见
+    if zero_turnover > n * 0.5:
+        print(f"[datasource] ⚠️ 数据漂移警告: {zero_turnover}/{n} 只换手率为0，"
+              f"东财可能已修改f8字段口径，请人工核对！")
+    if zero_inflow > n * 0.9:
+        print(f"[datasource] ⚠️ 数据漂移警告: {zero_inflow}/{n} 只主力净流入为0，"
+              f"东财可能已修改f62字段口径，请人工核对！")
 
 
 def fetch_snapshot_by_codes(codes):
@@ -159,8 +187,12 @@ def _f(v):
         return 0.0
 
 
-def fetch_kline(code, days=120):
-    """日K线（前复权），返回 [{date,open,close,high,low,volume,amount}]"""
+def fetch_kline(code, days=120, klt=101):
+    """K线（前复权）。klt=101 日K / klt=1 分钟K。
+
+    push2his 日K在部分网络环境会被断连；分钟K在 push2delay 上稳定。
+    日K拉取失败时自动降级：拉全天分钟K聚合（days*241根，days<=30时可用）。
+    """
     secid = code_to_secid(code)
     if not secid:
         return []
@@ -170,7 +202,7 @@ def fetch_kline(code, days=120):
             "secid": secid,
             "fields1": "f1,f2,f3",
             "fields2": "f51,f52,f53,f54,f55,f56,f57",
-            "klt": 101, "fqt": 1, "end": "20500101", "lmt": days,
+            "klt": klt, "fqt": 1, "end": "20500101", "lmt": days,
         },
     )
     klines = []
@@ -183,7 +215,49 @@ def fetch_kline(code, days=120):
                 "high": float(p[3]), "low": float(p[4]),
                 "volume": float(p[5]), "amount": float(p[6]),
             })
-    return klines
+        return klines
+
+    # 日K失败 → 分钟K聚合降级（仅 klt=101 时）
+    if klt == 101 and days <= 30:
+        m = fetch_kline(code, days * 241, klt=1)
+        if m:
+            return _aggregate_daily(m)
+    return []
+
+
+def _aggregate_daily(minute_bars):
+    """分钟K聚合成日K"""
+    days = {}
+    for bar in minute_bars:
+        days.setdefault(bar["date"][:10], []).append(bar)
+    return [
+        {
+            "date": d,
+            "open": bars[0]["open"], "close": bars[-1]["close"],
+            "high": max(b["high"] for b in bars), "low": min(b["low"] for b in bars),
+            "volume": sum(b["volume"] for b in bars),
+            "amount": sum(b["amount"] for b in bars),
+        }
+        for d, bars in sorted(days.items())
+    ]
+
+
+def fetch_first_minute(code, date_str=None):
+    """某日第一根分钟K（09:31，即开盘后第一分钟的实际成交区间）。
+
+    成交可行性建模用：竞价价只是虚拟撮合价，09:31 分钟K的 open/high/low 才是
+    开盘后真实可成交的价格区间。返回 {open,high,low,close} 或 None。
+    """
+    k = fetch_kline(code, days=10, klt=1)
+    if not k:
+        return None
+    target = (date_str or now_cn().strftime("%Y-%m-%d"))
+    first = None
+    for bar in k:
+        if bar["date"].startswith(target):
+            if first is None:  # 该日第一根（09:31）
+                first = bar
+    return first
 
 
 def is_today_trading_day():
@@ -317,8 +391,13 @@ def get_last_trade_date():
 
 # ---------- 每日归档（用于自算连板数） ----------
 
-def save_daily_archive(stocks):
-    """把当日涨停/强势股归档到 data/history/YYYYMMDD.json"""
+def save_daily_archive(stocks, raw_pages=None):
+    """把当日涨停/强势股归档到 data/history/YYYYMMDD.json
+
+    raw_pages: fetch_top_gainers(keep_raw=True) 的原始响应。
+    原始数据原样存档（一天几十KB）——归一化口径变了之后，
+    历史数据仍可基于原始归档重算，这是"口径改了还能重算"的唯一依据。
+    """
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     date_str = now_cn().strftime("%Y%m%d")
     limit_up = [s for s in stocks if is_limit_up(s)]
@@ -339,6 +418,10 @@ def save_daily_archive(stocks):
     }
     path = HISTORY_DIR / f"{date_str}.json"
     path.write_text(json.dumps(archive, ensure_ascii=False, indent=1), encoding="utf-8")
+    # 原始数据归档（独立文件，永不参与读取逻辑，只为将来重算保留）
+    if raw_pages:
+        raw_path = HISTORY_DIR / f"{date_str}_raw.json"
+        raw_path.write_text(json.dumps(raw_pages, ensure_ascii=False), encoding="utf-8")
     return limit_up
 
 
@@ -352,11 +435,13 @@ def load_prev_limit_ups(n_days=10):
         return result
     today = now_cn().strftime("%Y%m%d")
     for f in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
+        if f.stem.endswith("_raw"):
+            continue  # 原始数据归档（列表结构），不参与连板计算
         if len(result) >= n_days:
             break
         try:
             js = json.loads(f.read_text(encoding="utf-8"))
-            if js.get("date") == today:
+            if not isinstance(js, dict) or js.get("date") == today:
                 continue
             result[js["date"]] = {s["code"] for s in js.get("limit_up", [])}
         except (ValueError, KeyError):
