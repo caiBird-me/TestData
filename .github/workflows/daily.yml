@@ -1,0 +1,99 @@
+name: 每日股票分析
+# 北京时间 15:10 收盘复盘（UTC 07:10）/ 次日 09:20 竞价确认（UTC 01:20）
+# SendKey 通过 GitHub Secrets 的 SERVERCHAN_KEY 注入，绝不写入任何随仓库提交的文件
+on:
+  schedule:
+    - cron: '10 7 * * 1-5'   # 北京 15:10 周一~周五
+    - cron: '20 1 * * 1-6'   # 北京 09:20 周一~周六（覆盖周一早盘对应周六UTC）
+  workflow_dispatch:          # 支持手动触发（选 morning/evening）
+    inputs:
+      job:
+        description: '运行哪个任务'
+        required: true
+        default: 'evening'
+        type: choice
+        options:
+          - evening
+          - morning
+          - stats
+
+permissions:
+  contents: write             # 允许把运行数据 commit 回仓库
+
+concurrency:
+  group: daily-analysis
+  cancel-in-progress: false
+
+jobs:
+  evening:
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.job == 'evening'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 收盘复盘
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python src/main.py evening
+
+      - name: 提交运行数据
+        run: |
+          git config user.name "stock-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "data: evening $(date -u +%F)"
+          git push
+
+  morning:
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.job == 'morning'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 竞价确认
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python src/main.py morning
+
+      - name: 提交运行数据
+        run: |
+          git config user.name "stock-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "data: morning $(date -u +%F)"
+          git push
+
+  stats:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'stats'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 统计报告
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python src/main.py stats

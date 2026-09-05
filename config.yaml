@@ -1,0 +1,32 @@
+# A股短线动量/打板分析系统 配置文件
+
+capital:
+  total: 3000          # 总本金（元）
+
+risk:
+  max_position_pct: 0.50     # 单票最大仓位占比（约1500元）
+  max_stocks: 2              # 同日最多持仓股票数
+  stop_loss_pct: -0.05       # 硬止损 -5%
+  max_gap_up_pct: 0.07       # 高开超过7%不追
+  min_gap_pct: -0.02         # 低开超过-2%剔除
+  consecutive_loss_pause: 3  # 连续亏损3笔强制空仓1个交易日
+  min_price: 2.0             # 最低股价（过滤仙股）
+  max_price: 30.0            # 最高股价（3k本金买得起的上限，一手100股）
+
+strategy:
+  top_gainers_pages: 4        # 每页100只，按涨幅拉取前400只做分析
+  min_turnover_rate: 5.0      # 候选股最低换手率%
+  max_turnover_rate: 25.0     # 候选股最高换手率%（过高说明分歧大）
+  min_main_inflow: 0          # 主力净流入需为正（元）
+  max_candidates: 5           # 晚间输出候选池上限
+  final_picks: 2               # 早间最终作战计划股票数上限
+
+notify:
+  # ⚠️ 出于安全考虑，SendKey 不写入本文件（会随git推送到云端造成泄露）。
+  # 本地使用：先执行  set SERVERCHAN_KEY=你的SendKey  再运行程序；
+  # 云端使用：配置 GitHub Secrets 的 SERVERCHAN_KEY（见 README）。
+  serverchan_key: ""
+  # 推送渠道: serverchan / console / both
+  channel: "both"
+
+schedule_note: "云端GitHub Actions: 北京时间 15:10 收盘复盘 / 09:20 竞价确认"

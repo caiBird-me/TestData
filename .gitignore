@@ -1,0 +1,11 @@
+# 凭证不入库
+*.key
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# 临时文件
+_test*.json
+_t*.json
