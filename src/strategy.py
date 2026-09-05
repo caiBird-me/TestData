@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """策略引擎：晚间动量/涨停选股打分 + 早间竞价确认"""
 
-from datasource import limit_up_pct
+from datasource import is_limit_up, limit_up_pct
 
 
 # ---------- 主线题材识别 ----------
@@ -72,7 +72,6 @@ def evening_picks(stocks, limit_ups, streak_map, themes, cfg):
         board = (s.get("board") or "").strip()
         if board not in theme_names:
             continue
-        from datasource import is_limit_up
         if is_limit_up(s):
             continue  # 涨停的已走A类逻辑（首板按打分也放进B类池）
         if not (5 <= s["pct"] < limit_up_pct(s) - 0.5):

@@ -11,9 +11,21 @@ def fmt_amount(v):
     return f"{v:.0f}"
 
 
-def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause):
+def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settlements=None):
     """晚间复盘报告"""
     lines = [f"## 📊 收盘复盘 {date_str}", ""]
+
+    # 持仓结算
+    if settlements:
+        lines.append("**💰 持仓结算**")
+        for r in settlements:
+            if r["action"] == "sell":
+                lines.append(f"- 🔴 {r['name']}({r['code']}) {r['reason']}："
+                             f"{r['buy_price']}→{r['price']}，**{r['pnl_pct']:+.2f}%**")
+            else:
+                lines.append(f"- ⏸ {r['name']}({r['code']}) {r['reason']}"
+                             f"（现价{r['price']}）")
+        lines.append("")
 
     # 市场热度
     lines.append(f"今日涨停 **{len(limit_ups)}** 只（样本为涨幅榜前400）")

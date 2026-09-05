@@ -224,11 +224,6 @@ def get_last_trade_date():
     return now_cn().strftime("%Y%m%d")
 
 
-def is_trade_time_evening():
-    """收盘复盘是否可运行：非周末即可（节假日由数据空判断）"""
-    return now_cn().weekday() < 5
-
-
 # ---------- 每日归档（用于自算连板数） ----------
 
 def save_daily_archive(stocks):
@@ -290,6 +285,42 @@ def calc_streak_codes(today_limit_ups, prev_archives):
                 break
         streak[code] = n
     return streak
+
+
+def verify_streaks(today_limit_ups, streak_map):
+    """用日K线校验连板数，防止归档缺失虚增（如某天Actions挂了没归档）。
+
+    只校验归档算出 ≥2 板的票（通常几只，请求量小）。
+    K线拉取失败时保留归档结果（宁可多看一眼，不能没数据）。
+    """
+    verified = dict(streak_map)
+    for s in today_limit_ups:
+        code = s["code"]
+        if streak_map.get(code, 1) < 2:
+            continue
+        k = fetch_kline(code, 30)
+        if not k or len(k) < 2:
+            continue  # K线不可用，信任归档
+        # 从昨天（倒数第二根）往前数连续涨停日，今天本身已确认涨停
+        n = 1
+        i = len(k) - 2
+        while i >= 1:
+            prev_close = k[i - 1]["close"]
+            bar = k[i]
+            if prev_close <= 0:
+                break
+            pct = (bar["close"] - prev_close) / prev_close * 100
+            fake = {"code": code}
+            if pct >= limit_up_pct(fake) - 0.2 and bar["close"] >= bar["high"] - 0.01:
+                n += 1
+                i -= 1
+            else:
+                break
+        if n != streak_map[code]:
+            print(f"[datasource] 连板校验修正 {s['name']}({code}): "
+                  f"归档{streak_map[code]}板 -> K线{n}板")
+        verified[code] = n
+    return verified
 
 
 def limit_up_pct(stock):

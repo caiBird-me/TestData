@@ -39,26 +39,19 @@ def load_config():
     return cfg
 
 
-def last_signal_date():
-    """最近一次晚间信号的日期（YYYYMMDD），用于判断 morning 用哪天的候选"""
-    p = pf.DATA_DIR / "signals.json"
-    if p.exists():
-        import json
-        try:
-            signals = json.loads(p.read_text(encoding="utf-8"))
-            pend = [s for s in signals if s["status"] == "pending"]
-            if pend:
-                return max(s["signal_date"] for s in pend).replace("-", "")
-        except (ValueError, KeyError):
-            pass
-    return None
-
-
 def run_evening(cfg):
-    """收盘复盘：拉数据 → 识别涨停/主线 → 选明日候选 → 登记信号 → 归档 → 推送"""
+    """收盘复盘：结算持仓 → 拉数据 → 识别涨停/主线 → 选明日候选 → 登记信号 → 归档 → 推送"""
     rules = RiskRules(cfg)
     cfg["_risk"] = rules
     date_str = now_cn().strftime("%Y-%m-%d")
+
+    # 节假日判断：最近交易日 != 今天（按北京时间）说明今天是假日，直接退出
+    if os.environ.get("STOCK_FORCE") != "1":
+        today_cn = now_cn().strftime("%Y%m%d")
+        last_trade = ds.get_last_trade_date()
+        if last_trade != today_cn:
+            print(f"[evening] 今日非交易日（最近交易日 {last_trade}），跳过")
+            return 0
 
     print(f"[evening] 拉取全市场涨幅榜 ...")
     stocks = ds.fetch_top_gainers(cfg["strategy"]["top_gainers_pages"])
@@ -69,35 +62,47 @@ def run_evening(cfg):
     limit_ups = [s for s in stocks if ds.is_limit_up(s)]
     print(f"[evening] 样本{len(stocks)}只，涨停{len(limit_ups)}只")
 
-    # 归档（自算连板用）+ 连板计算
+    # ---------- 1. 先结算持仓（止损 / T+1尾盘卖出 / 涨停续持） ----------
+    portfolio = pf.Portfolio(cfg["capital"]["total"])
+    settlements = []
+    if portfolio.data["positions"]:
+        held_codes = list(portfolio.held_codes())
+        held_snap = ds.fetch_snapshot_by_codes(held_codes)
+        lu_codes = {s["code"] for s in limit_ups}
+        settlements = portfolio.settle_positions(date_str, held_snap, lu_codes)
+        sold = [r for r in settlements if r["action"] == "sell"]
+        print(f"[evening] 结算: 卖出{len(sold)}笔，继续持有{len(settlements)-len(sold)}笔")
+
+    # ---------- 2. 归档 + 连板计算（K线校验防归档缺失虚增） ----------
     ds.save_daily_archive(stocks)
     prev = ds.load_prev_limit_ups()
     streak = ds.calc_streak_codes(limit_ups, prev)
+    streak = ds.verify_streaks(limit_ups, streak)
     multi = {c: n for c, n in streak.items() if n >= 2}
     print(f"[evening] 连板股: {len(multi)}只", {k: v for k, v in list(multi.items())[:5]})
 
-    # 主线题材 + 候选
+    # ---------- 3. 主线题材 + 候选 ----------
     boards = ds.fetch_boards()
     themes = strategy.find_main_themes(limit_ups, boards)
     print(f"[evening] 主线题材: {[t['name'] for t in themes]}")
 
     picks = strategy.evening_picks(stocks, limit_ups, streak, themes, cfg)
 
-    # 登记虚拟信号（连亏熔断时不再登记）
-    portfolio = pf.Portfolio(cfg["capital"]["total"])
+    # ---------- 4. 登记虚拟信号（连亏熔断时不再登记） ----------
     pause, pause_reason = rules.need_pause(portfolio.signals)
     if not pause:
         for p in picks:
-            portfolio.register_signal(p, now_cn().strftime("%Y-%m-%d"))
-        portfolio.save()
+            portfolio.register_signal(p, date_str)
+    portfolio.save()
 
-    md = report.evening_report(date_str, themes, limit_ups, picks, rules, pause_reason if pause else None)
+    md = report.evening_report(date_str, themes, limit_ups, picks, rules,
+                                pause_reason if pause else None, settlements)
     notify.send(cfg, f"收盘复盘 {date_str}", md)
     return 0
 
 
 def run_morning(cfg):
-    """竞价确认：激活pending信号 → 过滤 → 输出作战计划 → 推送"""
+    """竞价确认：过滤昨晚信号 → 作战计划 → 只按计划虚拟买入 → 推送"""
     rules = RiskRules(cfg)
     cfg["_risk"] = rules
     date_str = now_cn().strftime("%Y-%m-%d")
@@ -113,26 +118,22 @@ def run_morning(cfg):
     codes = [s["code"] for s in pending]
     snapshot = ds.fetch_snapshot_by_codes(codes)
 
-    # 连亏熔断
+    # 连亏熔断：连亏N笔当天不买（虚拟盘同步执行，保证验证数据真实）
     pause, pause_reason = rules.need_pause(portfolio.signals)
 
     candidates = [
         {"code": s["code"], "name": s["name"], "board": s["board"], "kind": s["kind"],
-         "streak": s.get("streak", 1), "buy_range": [s.get("buy_low", 0), s.get("buy_high", 0)],
-         "stop_loss": 0}
+         "streak": s.get("streak", 1), "buy_range": [s.get("price", 0) * 0.98, s.get("price", 0) * 1.02],
+         "stop_loss": s.get("stop_loss") or rules.stop_loss_price(s.get("price") or 10)}
         for s in pending
     ]
-    # 重新计算止损价（基于信号日收盘，即昨晚 pick 的 price）
-    for c, s in zip(candidates, pending):
-        if not c["stop_loss"]:
-            c["stop_loss"] = rules.stop_loss_price(s.get("ref_price", 0) or 10)
 
     plan, rejected = strategy.morning_confirm(candidates, snapshot, cfg)
 
-    # 虚拟买入（真实执行记录）：morning_confirm 通过的按现价虚拟买入
+    # 虚拟盘只买作战计划通过的票：按计划股数、守 max_stocks 上限
     if not pause:
-        activated = portfolio.activate_pending(date_str, snapshot)
-        print(f"[morning] 虚拟买入 {len(activated)} 笔")
+        bought = portfolio.execute_plan(date_str, plan, snapshot, rules.max_stocks)
+        print(f"[morning] 虚拟买入 {len(bought)} 笔: {[b['name'] for b in bought]}")
     portfolio.save()
 
     md = report.morning_report(date_str, plan, rejected, rules, pause_reason if pause else None)
@@ -175,20 +176,30 @@ def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("morning", "evening", "stats"):
         print(__doc__)
         return 1
-    cfg = load_config()
     cmd = sys.argv[1]
-    # STOCK_FORCE=1 可跳过周末检查（手动测试用）
-    force = os.environ.get("STOCK_FORCE") == "1"
-    if cmd in ("evening", "morning"):
-        # 非交易日（周末，按北京时间判断）直接退出
-        if not force and now_cn().weekday() >= 5:
-            print("[{}] 周末（北京时间），跳过。设置 STOCK_FORCE=1 可强制运行".format(cmd))
-            return 0
-    if cmd == "evening":
-        return run_evening(cfg)
-    if cmd == "morning":
-        return run_morning(cfg)
-    return run_stats(cfg)
+    try:
+        cfg = load_config()
+        # STOCK_FORCE=1 可跳过周末/节假日检查（手动测试用）
+        force = os.environ.get("STOCK_FORCE") == "1"
+        if cmd in ("evening", "morning"):
+            if not force and now_cn().weekday() >= 5:
+                print("[{}] 周末（北京时间），跳过。设置 STOCK_FORCE=1 可强制运行".format(cmd))
+                return 0
+        if cmd == "evening":
+            return run_evening(cfg)
+        if cmd == "morning":
+            return run_morning(cfg)
+        return run_stats(cfg)
+    except Exception:
+        # 异常也要推送到微信——否则云端挂了你只会看到workflow变红
+        import traceback
+        tb = traceback.format_exc()
+        print(tb)
+        try:
+            notify.send(cfg, f"❌ {cmd} 运行异常", "```\n" + tb[-1500:] + "\n```")
+        except Exception:
+            pass
+        return 1
 
 
 if __name__ == "__main__":

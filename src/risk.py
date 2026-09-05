@@ -30,8 +30,9 @@ class RiskRules:
         return shares, shares * price
 
     def affordable(self, price):
-        """3k本金是否买得起一手"""
-        return self.min_price <= price <= self.max_price
+        """本金+仓位上限约束下是否买得起一手（如1500元上限→股价≤15元）"""
+        return (self.min_price <= price <= self.max_price
+                and price * 100 <= self.max_position_amount())
 
     # ---------- 早间竞价过滤 ----------
 
