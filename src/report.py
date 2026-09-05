@@ -11,9 +11,18 @@ def fmt_amount(v):
     return f"{v:.0f}"
 
 
-def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settlements=None):
+def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settlements=None,
+                   sentiment=None, lu_count=0):
     """晚间复盘报告"""
     lines = [f"## 📊 收盘复盘 {date_str}", ""]
+
+    # 市场情绪（明日早间总开关的参考）
+    if sentiment is not None:
+        mood = "🔥 赚钱效应" if sentiment >= 0 else "🧊 亏钱效应"
+        lines.append(f"**市场情绪**：昨日 {lu_count} 只涨停股今日平均 **{sentiment:+.2f}%**（{mood}）")
+        if sentiment < 0:
+            lines.append("⚠️ 明日早间若仍为亏钱效应，系统将整体空仓")
+        lines.append("")
 
     # 持仓结算
     if settlements:
@@ -70,14 +79,27 @@ def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settle
     return "\n".join(lines)
 
 
-def morning_report(date_str, plan, rejected, risk_rules, pause):
+def morning_report(date_str, plan, rejected, risk_rules, pause,
+                   sentiment=None, sentiment_bad=False):
     """早间作战计划报告"""
     lines = [f"## ⚔️ 今日作战计划 {date_str}", ""]
+
+    # 市场情绪总开关
+    if sentiment is not None:
+        mood = "🔥 赚钱效应" if sentiment >= 0 else "🧊 亏钱效应"
+        lines.append(f"**市场情绪**：昨日涨停股今日平均 **{sentiment:+.2f}%**（{mood}）")
+        lines.append("")
 
     if pause:
         lines.append(f"🚨 **{pause}**")
         lines.append("")
         lines.append("_今日不操作，保存本金，等待信号。_")
+        return "\n".join(lines)
+
+    if sentiment_bad:
+        lines.append("🧊 **亏钱效应触发市场总开关：今日整体空仓，不买入**")
+        lines.append("")
+        lines.append("_打板策略的回撤是集群式的，退潮期最好的操作是不操作。_")
         return "\n".join(lines)
 
     if not plan:

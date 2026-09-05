@@ -186,6 +186,97 @@ def fetch_kline(code, days=120):
     return klines
 
 
+def is_today_trading_day():
+    """判断今天是否交易日（morning 盘前用，日K此时还停留在昨天无法区分）。
+
+    原理：上证指数行情时间戳 f86 在交易日竞价完成后（09:25）会更新为当日；
+    非交易日返回的是上一交易日收盘时间。时间戳拉不到时保守视为交易日。
+    """
+    data = _get(
+        "https://push2.eastmoney.com/api/qt/stock/get",
+        {"secid": "1.000001", "fields": "f86",
+         "ut": "bd1d9ddb04089700cf9c27f6f7426281", "invt": 2, "fltt": 2},
+    )
+    ts = int((data or {}).get("f86") or 0)
+    if ts <= 0:
+        return True
+    quote_day = datetime.fromtimestamp(ts, CN_TZ).strftime("%Y%m%d")
+    return quote_day == now_cn().strftime("%Y%m%d")
+
+
+def get_kline_last_date(index_secid="1.000300"):
+    """指数日K最后一根的日期（= 最近一个已收盘的交易日），morning 判断信号过期用"""
+    data = _get(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+        {"secid": index_secid, "fields1": "f1", "fields2": "f51,f53",
+         "klt": 101, "fqt": 1, "end": "20500101", "lmt": 5},
+    )
+    if data and data.get("klines"):
+        return data["klines"][-1].split(",")[0]
+    return None
+
+
+def fetch_concept_map(n_boards=40):
+    """构建 股票代码→所属热门概念板块名列表 映射（题材聚类用，支持一票多属）。
+
+    做法：拉今日涨幅前 n_boards 个概念板块（m:90 t:3），
+    再逐板块拉成分股（按涨幅排序前100只，涨停股必在其中）。
+    板块接口失败时返回空 dict，调用方回退到 f100 行业聚类。
+    """
+    boards = _get(
+        "https://push2.eastmoney.com/api/qt/clist/get",
+        {
+            "pn": 1, "pz": n_boards, "po": 1, "np": 1,
+            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+            "fltt": 2, "invt": 2, "fid": "f3", "fs": "m:90+t:3",
+            "fields": "f12,f14",
+        },
+    )
+    if not boards or not boards.get("diff"):
+        return {}
+
+    concept_map = {}
+    for b in boards["diff"]:
+        bcode, bname = b.get("f12"), b.get("f14")
+        if not bcode:
+            continue
+        members = _get(
+            "https://push2.eastmoney.com/api/qt/clist/get",
+            {
+                "pn": 1, "pz": 100, "po": 1, "np": 1,
+                "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+                "fltt": 2, "invt": 2, "fid": "f3", "fs": f"b:{bcode}",
+                "fields": "f12",
+            },
+        )
+        if not members or not members.get("diff"):
+            continue
+        for m in members["diff"]:
+            code = str(m.get("f12", "")).zfill(6)
+            if code:
+                concept_map.setdefault(code, []).append(bname)
+    return concept_map
+
+
+def calc_sentiment():
+    """市场情绪：昨日涨停股今日的平均涨跌幅（打板体系的赚/亏钱效应核心指标）。
+
+    返回 (平均涨幅%, 板块数)。昨日涨停名单从归档读取；无归档返回 (None, 0)。
+    """
+    prev = load_prev_limit_ups(1)
+    if not prev:
+        return None, 0
+    last_date = max(prev.keys())
+    codes = list(prev[last_date])
+    if not codes:
+        return None, 0
+    snap = fetch_snapshot_by_codes(codes)
+    pcts = [s["pct"] for s in snap.values() if s["pct"] is not None]
+    if not pcts:
+        return None, 0
+    return round(sum(pcts) / len(pcts), 2), len(codes)
+
+
 def fetch_boards():
     """行业+概念板块行情，返回按涨幅排序的板块列表"""
     data = _get(
@@ -252,19 +343,22 @@ def save_daily_archive(stocks):
 
 
 def load_prev_limit_ups(n_days=10):
-    """读取最近 n 天的涨停归档，返回 {date: {code: name}}"""
+    """读取今天之前最近 n 个交易日的涨停归档，返回 {date: {code}}
+
+    n_days 语义 = 排除今天后的归档天数（今天的不算——晚间运行时当日涨停已在内存里）
+    """
     result = {}
     if not HISTORY_DIR.exists():
         return result
-    files = sorted(HISTORY_DIR.glob("*.json"), reverse=True)[:n_days + 1]
     today = now_cn().strftime("%Y%m%d")
-    for f in files:
+    for f in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
+        if len(result) >= n_days:
+            break
         try:
             js = json.loads(f.read_text(encoding="utf-8"))
             if js.get("date") == today:
-                continue  # 今天的归档不算（晚间运行时当日已包含在内存数据里）
-            codes = {s["code"] for s in js.get("limit_up", [])}
-            result[js["date"]] = codes
+                continue
+            result[js["date"]] = {s["code"] for s in js.get("limit_up", [])}
         except (ValueError, KeyError):
             continue
     return result

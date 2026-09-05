@@ -68,7 +68,9 @@ def run_evening(cfg):
     if portfolio.data["positions"]:
         held_codes = list(portfolio.held_codes())
         held_snap = ds.fetch_snapshot_by_codes(held_codes)
-        lu_codes = {s["code"] for s in limit_ups}
+        # 持仓的涨停判断用自身快照（涨幅达涨停幅度且收盘=最高），
+        # 不走 top400 样本——千股涨停日样本截断会把持仓误判成"未涨停"提前卖出
+        lu_codes = {c for c, s in held_snap.items() if ds.is_limit_up(s)}
         settlements = portfolio.settle_positions(date_str, held_snap, lu_codes)
         sold = [r for r in settlements if r["action"] == "sell"]
         print(f"[evening] 结算: 卖出{len(sold)}笔，继续持有{len(settlements)-len(sold)}笔")
@@ -81,12 +83,18 @@ def run_evening(cfg):
     multi = {c: n for c, n in streak.items() if n >= 2}
     print(f"[evening] 连板股: {len(multi)}只", {k: v for k, v in list(multi.items())[:5]})
 
-    # ---------- 3. 主线题材 + 候选 ----------
+    # ---------- 3. 主线题材（概念聚类优先，失败回退行业） + 候选 ----------
     boards = ds.fetch_boards()
-    themes = strategy.find_main_themes(limit_ups, boards)
+    concept_map = ds.fetch_concept_map()
+    if concept_map:
+        print(f"[evening] 概念映射: {len(concept_map)}只股票, "
+              f"{len(set(sum(concept_map.values(), [])))}个概念板块")
+    else:
+        print("[evening] 概念接口失败，回退行业聚类")
+    themes = strategy.find_main_themes(limit_ups, boards, concept_map)
     print(f"[evening] 主线题材: {[t['name'] for t in themes]}")
 
-    picks = strategy.evening_picks(stocks, limit_ups, streak, themes, cfg)
+    picks = strategy.evening_picks(stocks, limit_ups, streak, themes, cfg, concept_map)
 
     # ---------- 4. 登记虚拟信号（连亏熔断时不再登记） ----------
     pause, pause_reason = rules.need_pause(portfolio.signals)
@@ -95,8 +103,12 @@ def run_evening(cfg):
             portfolio.register_signal(p, date_str)
     portfolio.save()
 
+    # 市场情绪（明日早间总开关的参考值）：昨日涨停股今日平均表现
+    sentiment, lu_count = ds.calc_sentiment()
+
     md = report.evening_report(date_str, themes, limit_ups, picks, rules,
-                                pause_reason if pause else None, settlements)
+                                pause_reason if pause else None, settlements,
+                                sentiment, lu_count)
     notify.send(cfg, f"收盘复盘 {date_str}", md)
     return 0
 
@@ -107,16 +119,43 @@ def run_morning(cfg):
     cfg["_risk"] = rules
     date_str = now_cn().strftime("%Y-%m-%d")
 
+    # 假日判断：盘前日K还停留在昨天，无法区分「假日」和「盘前」，
+    # 用行情时间戳（竞价完成后会更新为当日）判断，避免假日幻影交易
+    if not ds.is_today_trading_day():
+        print("[morning] 今日非交易日（行情时间戳未更新），跳过")
+        return 0
+
     portfolio = pf.Portfolio(cfg["capital"]["total"])
     pending = portfolio.pending_signals()
+
+    # 信号过期检查：信号次日有效，过时不候。
+    # 昨晚的信号 signal_date 必须等于最近一个已收盘交易日（今晨盘前日K最后一根）
+    kline_last = ds.get_kline_last_date()
+    expired = []
+    if kline_last:
+        expired = [s for s in pending if s["signal_date"] != kline_last]
+        for s in expired:
+            s["status"] = "cancelled"
+            s["reason"] = "信号过期（非次日，作废）"
+        pending = portfolio.pending_signals()
+    if expired:
+        print(f"[morning] 过期信号作废 {len(expired)} 笔: {[s['name'] for s in expired]}")
+        portfolio.save()
+
     if not pending:
         notify.send(cfg, f"竞价确认 {date_str}",
-                    f"## ⚔️ 今日作战计划 {date_str}\n\n昨晚无候选信号，今日观望。")
+                    f"## ⚔️ 今日作战计划 {date_str}\n\n昨晚无候选信号（或已过期），今日观望。")
         return 0
 
     print(f"[morning] 待确认信号 {len(pending)} 个，拉取实时行情 ...")
     codes = [s["code"] for s in pending]
     snapshot = ds.fetch_snapshot_by_codes(codes)
+
+    # 市场情绪总开关：昨日涨停股今日平均表现 < 0 = 亏钱效应，整体空仓
+    sentiment, lu_count = ds.calc_sentiment()
+    sentiment_bad = sentiment is not None and sentiment < cfg["strategy"]["sentiment_threshold"]
+    if sentiment is not None:
+        print(f"[morning] 市场情绪: 昨日{lu_count}只涨停股今日平均 {sentiment:+.2f}%")
 
     # 连亏熔断：连亏N笔当天不买（虚拟盘同步执行，保证验证数据真实）
     pause, pause_reason = rules.need_pause(portfolio.signals)
@@ -131,12 +170,13 @@ def run_morning(cfg):
     plan, rejected = strategy.morning_confirm(candidates, snapshot, cfg)
 
     # 虚拟盘只买作战计划通过的票：按计划股数、守 max_stocks 上限
-    if not pause:
+    if not pause and not sentiment_bad:
         bought = portfolio.execute_plan(date_str, plan, snapshot, rules.max_stocks)
         print(f"[morning] 虚拟买入 {len(bought)} 笔: {[b['name'] for b in bought]}")
     portfolio.save()
 
-    md = report.morning_report(date_str, plan, rejected, rules, pause_reason if pause else None)
+    md = report.morning_report(date_str, plan, rejected, rules,
+                               pause_reason if pause else None, sentiment, sentiment_bad)
     notify.send(cfg, f"竞价确认 {date_str}", md)
     return 0
 

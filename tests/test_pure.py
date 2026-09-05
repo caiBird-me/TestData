@@ -10,6 +10,8 @@ os.chdir(Path(__file__).resolve().parent.parent)
 
 from datasource import calc_streak_codes, is_limit_up, limit_up_pct
 from risk import RiskRules
+from strategy import (STREAK_SCORE, find_main_themes, in_themes,
+                      streak_score, turnover_bounds)
 
 CFG = {
     "capital": {"total": 3000},
@@ -17,6 +19,10 @@ CFG = {
         "max_position_pct": 0.50, "max_stocks": 2, "stop_loss_pct": -0.05,
         "max_gap_up_pct": 0.07, "min_gap_pct": -0.02, "consecutive_loss_pause": 3,
         "min_price": 2.0, "max_price": 30.0,
+    },
+    "strategy": {
+        "min_turnover_rate": 5.0, "max_turnover_rate": 25.0,
+        "wide_turnover_factor": 1.6,
     },
 }
 
@@ -164,6 +170,65 @@ class TestNeedPause(unittest.TestCase):
         signals = [{"status": "pending", "pnl_pct": None}]
         pause, _ = make_rules().need_pause(signals)
         self.assertFalse(pause)
+
+
+class TestStreakScore(unittest.TestCase):
+    def test_curve_peaks_at_2_3(self):
+        """2-3板是主升启动点，权重最高"""
+        self.assertEqual(streak_score(2), STREAK_SCORE[2])
+        self.assertTrue(streak_score(2) >= streak_score(4))
+        self.assertTrue(streak_score(3) >= streak_score(5))
+        self.assertTrue(streak_score(5) < streak_score(2))
+
+    def test_high_streak_downweighted(self):
+        """5板以上博弈性质强，降权"""
+        self.assertEqual(streak_score(6), 8)
+
+
+class TestTurnoverBounds(unittest.TestCase):
+    def test_main_board(self):
+        lo, hi = turnover_bounds(make_stock("600000", 5, 10, 10.5), CFG)
+        self.assertEqual((lo, hi), (5.0, 25.0))
+
+    def test_wide_for_20cm(self):
+        """创业板/科创板换手上限放大"""
+        lo, hi = turnover_bounds(make_stock("300001", 15, 12, 12), CFG)
+        self.assertEqual((lo, hi), (5.0, 40.0))
+
+
+class TestConceptThemes(unittest.TestCase):
+    def setUp(self):
+        self.lu = [make_stock("600001", 10, 11, 11), make_stock("600002", 10, 21, 21),
+                   make_stock("600003", 10, 31, 31)]
+        self.boards = [{"name": "机器人", "pct": 3.0}]
+
+    def test_multi_membership(self):
+        """一票多属：同一票计入多个概念，count>=3 才算主线"""
+        cmap = {"600001": ["机器人", "减速器"], "600002": ["机器人"],
+                "600003": ["机器人", "AI算力"]}
+        themes = find_main_themes(self.lu, self.boards, cmap)
+        self.assertEqual(len(themes), 1)
+        self.assertEqual(themes[0]["name"], "机器人")
+        self.assertEqual(themes[0]["count"], 3)
+
+    def test_min_count_fallback(self):
+        """概念模式下 count<3 不成主线"""
+        cmap = {"600001": ["机器人"], "600002": ["机器人"]}
+        themes = find_main_themes(self.lu, self.boards, cmap)
+        self.assertEqual(themes, [])
+
+    def test_industry_fallback(self):
+        """无概念映射时回退行业字段（count>=2 即可）"""
+        for s, b in zip(self.lu, ["酿酒", "酿酒"]):
+            s["board"] = b
+        themes = find_main_themes(self.lu, self.boards, None)
+        self.assertEqual(themes[0]["count"], 2)
+
+    def test_in_themes(self):
+        cmap = {"600001": ["机器人"]}
+        names = {"机器人"}
+        self.assertTrue(in_themes(make_stock("600001", 5, 10, 10), names, cmap))
+        self.assertFalse(in_themes(make_stock("600099", 5, 10, 10), names, cmap))
 
 
 if __name__ == "__main__":

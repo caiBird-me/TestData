@@ -11,15 +11,18 @@ risk:
   min_gap_pct: -0.02         # 低开超过-2%剔除
   consecutive_loss_pause: 3  # 连续亏损3笔强制空仓1个交易日
   min_price: 2.0             # 最低股价（过滤仙股）
-  max_price: 30.0            # 最高股价（3k本金买得起的上限，一手100股）
+  max_price: 30.0            # ⚠️ 已被仓位上限实质覆盖：单票≤50%本金(1500元)意味着
+                             #   一手 affordable 的股价上限=15元。此参数仅作二次兜底，
+                             #   调整单票可买价格请改 max_position_pct，改这里不生效。
 
 strategy:
   top_gainers_pages: 4        # 每页100只，按涨幅拉取前400只做分析
-  min_turnover_rate: 5.0      # 候选股最低换手率%
-  max_turnover_rate: 25.0     # 候选股最高换手率%（过高说明分歧大）
-  min_main_inflow: 0          # 主力净流入需为正（元）
+  min_turnover_rate: 5.0      # 候选股最低换手率%（主板档）
+  max_turnover_rate: 25.0     # 候选股最高换手率%（主板档；过高说明分歧大）
+  wide_turnover_factor: 1.6   # 20cm/30cm板块（创业板/科创板/北交所）换手上限放大系数
   max_candidates: 5           # 晚间输出候选池上限
-  final_picks: 2               # 早间最终作战计划股票数上限
+  final_picks: 2              # 早间最终作战计划股票数上限
+  sentiment_threshold: 0      # 市场总开关：昨日涨停股今日平均涨幅低于此值(%)则整体空仓
 
 notify:
   # ⚠️ 出于安全考虑，SendKey 不写入本文件（会随git推送到云端造成泄露）。
