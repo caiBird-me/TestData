@@ -5,7 +5,9 @@
   py src/main.py evening   # 收盘复盘（15:10后）
   py src/main.py morning   # 竞价确认（09:15~09:25）
   py src/main.py stats     # 虚拟盘统计
+  py src/main.py backtest [起始年 结束年]  # 历史事件回测（建议云端跑）
 """
+import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -77,9 +79,21 @@ def run_evening(cfg):
 
     # ---------- 2. 归档（含原始数据，口径漂移后可重算）+ 连板计算 ----------
     ds.save_daily_archive(stocks, raw_pages)
+
+    # 涨停池（封板质量 + 官方连板数）：比涨幅榜自算更强的口径
+    zt_pool = ds.fetch_zt_pool()
+    if zt_pool:
+        ds.save_zt_archive(zt_pool)
+        print(f"[evening] 涨停池: {len(zt_pool)}只（含封板时间/炸板/封单额）")
+    else:
+        print("[evening] 涨停池接口失败，回退自算口径（无封板质量打分）")
+
     prev = ds.load_prev_limit_ups()
     streak = ds.calc_streak_codes(limit_ups, prev)
     streak = ds.verify_streaks(limit_ups, streak)
+    # 官方连板数是权威口径，直接覆盖自算值（池内覆盖全部当日涨停股）
+    if zt_pool:
+        streak.update({s["code"]: s["streak"] for s in zt_pool})
     multi = {c: n for c, n in streak.items() if n >= 2}
     print(f"[evening] 连板股: {len(multi)}只", {k: v for k, v in list(multi.items())[:5]})
 
@@ -94,7 +108,8 @@ def run_evening(cfg):
     themes = strategy.find_main_themes(limit_ups, boards, concept_map)
     print(f"[evening] 主线题材: {[t['name'] for t in themes]}")
 
-    picks = strategy.evening_picks(stocks, limit_ups, streak, themes, cfg, concept_map)
+    picks = strategy.evening_picks(stocks, limit_ups, streak, themes, cfg, concept_map,
+                                   zt_pool)
 
     # ---------- 4. 登记虚拟信号（连亏熔断时不再登记） ----------
     pause, pause_reason = rules.need_pause(portfolio.signals)
@@ -103,14 +118,43 @@ def run_evening(cfg):
             portfolio.register_signal(p, date_str)
     portfolio.save()
 
-    # 市场情绪（明日早间总开关的参考值）：昨日涨停股今日平均表现
+    # 市场情绪（明日早间总开关的参考值）：昨日涨停股今日平均表现 + 晋级率
     sentiment, lu_count = ds.calc_sentiment()
+    promotion = ds.calc_promotion_rate(zt_pool)
+    if promotion and promotion[0] is not None:
+        print(f"[evening] 晋级率: {promotion[2]}/{promotion[1]} = {promotion[0]*100:.0f}%")
+    _save_sentiment(date_str, sentiment, lu_count, promotion)
+
+    # 归档保留策略：原始数据只留最近10天（一天上百KB，防止仓库膨胀）
+    removed = ds.cleanup_archives()
+    if removed:
+        print(f"[evening] 清理过期归档 {removed} 个")
 
     md = report.evening_report(date_str, themes, limit_ups, picks, rules,
                                 pause_reason if pause else None, settlements,
-                                sentiment, lu_count)
+                                sentiment, lu_count, promotion)
     notify.send(cfg, f"收盘复盘 {date_str}", md)
     return 0
+
+
+def _save_sentiment(date_str, sentiment, lu_count, promotion):
+    """情绪指标落盘（morning 的总开关读取昨天的值：晋级率<15% = 接力退潮）"""
+    data = {"date": date_str, "sentiment": sentiment, "lu_count": lu_count}
+    if promotion:
+        data["promotion_rate"], data["prev_lu_count"], data["promoted"] = promotion
+    path = ds.DATA_DIR / "sentiment.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_sentiment():
+    """读取最近一次落盘的情绪指标（昨天收盘计算的晋级率/均涨幅）"""
+    path = ds.DATA_DIR / "sentiment.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return None
 
 
 def run_morning(cfg):
@@ -126,6 +170,7 @@ def run_morning(cfg):
         return 0
 
     portfolio = pf.Portfolio(cfg["capital"]["total"], cfg.get("trading_costs"))
+    sent_data = _load_sentiment()  # 昨日收盘计算的情绪指标（晋级率等）
     pending = portfolio.pending_signals()
 
     # 信号过期检查：信号次日有效，过时不候。
@@ -190,11 +235,21 @@ def run_morning(cfg):
     if position_actions:
         portfolio.save()
 
-    # 市场情绪总开关：昨日涨停股今日平均表现 < 0 = 亏钱效应，整体空仓
+    # 市场情绪总开关（两道闸）：
+    # a) 昨日涨停股今日平均表现 < 0 = 亏钱效应（实时，竞价/盘中价格）
+    # b) 昨日收盘计算的晋级率 < 15% = 接力退潮（均涨幅为正可能是炸板拉平的假象，
+    #    晋级率直接反映资金愿不愿意接昨天的板——更前瞻）
     sentiment, lu_count = ds.calc_sentiment()
     sentiment_bad = sentiment is not None and sentiment < cfg["strategy"]["sentiment_threshold"]
     if sentiment is not None:
         print(f"[morning] 市场情绪: 昨日{lu_count}只涨停股今日平均 {sentiment:+.2f}%")
+
+    promo_rate = (sent_data or {}).get("promotion_rate") if sent_data else None
+    promo_bad = promo_rate is not None and \
+        promo_rate < cfg["strategy"].get("promotion_rate_min", 0.15)
+    if promo_rate is not None:
+        print(f"[morning] 晋级率: {(sent_data or {}).get('promoted')}/"
+              f"{(sent_data or {}).get('prev_lu_count')} = {promo_rate*100:.0f}%")
 
     # 连亏熔断：连亏N笔当天不买（虚拟盘同步执行，保证验证数据真实）
     pause, pause_reason = rules.need_pause(portfolio.signals)
@@ -218,15 +273,43 @@ def run_morning(cfg):
             p["open_price"] = round(avg * (1 + slippage), 2)
 
     # 虚拟盘只买作战计划通过的票：按计划股数、守 max_stocks 上限
-    if not pause and not sentiment_bad:
+    if not pause and not sentiment_bad and not promo_bad:
         bought = portfolio.execute_plan(date_str, plan, snapshot, rules.max_stocks)
         print(f"[morning] 虚拟买入 {len(bought)} 笔: {[b['name'] for b in bought]}")
     portfolio.save()
 
     md = report.morning_report(date_str, plan, rejected, rules,
                                pause_reason if pause else None, sentiment, sentiment_bad,
-                               position_actions)
+                               position_actions, promo_rate, promo_bad)
     notify.send(cfg, f"竞价确认 {date_str}", md)
+    return 0
+
+
+def run_backtest(cfg, start_year=None, end_year=None):
+    """历史事件回测：全市场日K自建涨停日历 → 模拟策略 → 统计报告。
+
+    注意：需要 push2his（多年日K），本地网络不通时请在云端 Actions 手动触发。
+    """
+    import backtest as bt
+    md, results = bt.run_backtest(cfg, start_year, end_year)
+
+    # 结果摘要落盘（K线缓存不进git，见.gitignore；结果小，进仓库留档）
+    out = bt.DATA_DIR / "backtest"
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "generated": now_cn().strftime("%Y-%m-%d %H:%M"),
+        "range": f"{start_year or 2019}-{end_year or now_cn().year}",
+        "events": len(results),
+        "by_year": {},
+    }
+    for r in results:
+        y = r["date"][:4]
+        summary["by_year"].setdefault(y, []).append(r["pnl_pct"])
+    (out / "report.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    print(md)
+    notify.send(cfg, f"🧪 回测报告 {summary['range']}", md)
     return 0
 
 
@@ -262,7 +345,7 @@ def run_stats(cfg):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("morning", "evening", "stats"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("morning", "evening", "stats", "backtest"):
         print(__doc__)
         return 1
     cmd = sys.argv[1]
@@ -278,6 +361,10 @@ def main():
             return run_evening(cfg)
         if cmd == "morning":
             return run_morning(cfg)
+        if cmd == "backtest":
+            start = int(sys.argv[2]) if len(sys.argv) > 2 else None
+            end = int(sys.argv[3]) if len(sys.argv) > 3 else None
+            return run_backtest(cfg, start, end)
         return run_stats(cfg)
     except Exception:
         # 异常也要推送到微信——否则云端挂了你只会看到workflow变红

@@ -11,17 +11,41 @@ def fmt_amount(v):
     return f"{v:.0f}"
 
 
+def fmt_seal(pick):
+    """封板质量摘要：封板时间/炸板次数/封单额（涨停池数据缺失时为空）"""
+    seal = pick.get("seal")
+    if not seal:
+        return ""
+    fs = seal.get("first_seal") or 0
+    hh, mm = fs // 10000, (fs // 100) % 100
+    parts = [f"封板{hh:02d}:{mm:02d}"]
+    b = seal.get("breaks") or 0
+    parts.append("零炸" if b == 0 else f"炸板{b}次")
+    amt = seal.get("seal_amount") or 0
+    if amt:
+        parts.append(f"封单{fmt_amount(amt)}")
+    return " | ".join(parts)
+
+
 def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settlements=None,
-                   sentiment=None, lu_count=0):
-    """晚间复盘报告"""
+                   sentiment=None, lu_count=0, promotion=None):
+    """晚间复盘报告。promotion=(晋级率, 昨日涨停数, 晋级数)"""
     lines = [f"## 📊 收盘复盘 {date_str}", ""]
 
     # 市场情绪（明日早间总开关的参考）
-    if sentiment is not None:
-        mood = "🔥 赚钱效应" if sentiment >= 0 else "🧊 亏钱效应"
-        lines.append(f"**市场情绪**：昨日 {lu_count} 只涨停股今日平均 **{sentiment:+.2f}%**（{mood}）")
-        if sentiment < 0:
-            lines.append("⚠️ 明日早间若仍为亏钱效应，系统将整体空仓")
+    if sentiment is not None or promotion:
+        parts = []
+        if sentiment is not None:
+            mood = "🔥 赚钱效应" if sentiment >= 0 else "🧊 亏钱效应"
+            parts.append(f"昨日涨停股今日平均 **{sentiment:+.2f}%**（{mood}）")
+        if promotion and promotion[0] is not None:
+            rate, ycount, promoted = promotion
+            level = "🔥" if rate >= 0.3 else ("🌊" if rate >= 0.2 else "🧊")
+            parts.append(f"晋级率 **{rate*100:.0f}%**（{promoted}/{ycount}，{level}）")
+        lines.append(f"**市场情绪**：{'；'.join(parts)}")
+        if (sentiment is not None and sentiment < 0) or \
+           (promotion and promotion[0] is not None and promotion[0] < 0.15):
+            lines.append("⚠️ 明日早间若情绪开关仍触发，系统将整体空仓")
         lines.append("")
 
     # 持仓结算
@@ -57,12 +81,14 @@ def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settle
     else:
         for i, p in enumerate(picks, 1):
             low, high = p["buy_range"]
+            seal = fmt_seal(p)
             lines.append(
                 f"{i}. **{p['name']}({p['code']})** [{p['kind']}"
                 + (f"/{p['streak']}板" if p["streak"] > 1 else "") + "] "
                 f"板块:{p['board']} | 今日{p['pct']:+.1f}% 收{p['price']:.2f}元 | "
                 f"换手{p['turnover']:.1f}% | 主力净流入{fmt_amount(p['main_inflow'])}\n"
                 f"   📌 计划买入: **{low}~{high}元** | 止损: **{p['stop_loss']}元** | 打分{p['score']}"
+                + (f"\n   🔒 {seal}" if seal else "")
             )
     lines.append("")
 
@@ -80,7 +106,8 @@ def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settle
 
 
 def morning_report(date_str, plan, rejected, risk_rules, pause,
-                   sentiment=None, sentiment_bad=False, position_actions=None):
+                   sentiment=None, sentiment_bad=False, position_actions=None,
+                   promotion_rate=None, promo_bad=False):
     """早间作战计划报告"""
     lines = [f"## ⚔️ 今日作战计划 {date_str}", ""]
 
@@ -92,9 +119,16 @@ def morning_report(date_str, plan, rejected, risk_rules, pause,
         lines.append("")
 
     # 市场情绪总开关
-    if sentiment is not None:
-        mood = "🔥 赚钱效应" if sentiment >= 0 else "🧊 亏钱效应"
-        lines.append(f"**市场情绪**：昨日涨停股今日平均 **{sentiment:+.2f}%**（{mood}）")
+    if sentiment is not None or promotion_rate is not None:
+        parts = []
+        if sentiment is not None:
+            mood = "🔥 赚钱效应" if sentiment >= 0 else "🧊 亏钱效应"
+            parts.append(f"昨日涨停股今日平均 **{sentiment:+.2f}%**（{mood}）")
+        if promotion_rate is not None:
+            mood = "🔥 接力活跃" if promotion_rate >= 0.3 else \
+                ("🌊 正常" if promotion_rate >= 0.2 else "🧊 退潮")
+            parts.append(f"晋级率 **{promotion_rate*100:.0f}%**（{mood}）")
+        lines.append(f"**市场情绪**：{'；'.join(parts)}")
         lines.append("")
 
     if pause:
@@ -103,8 +137,10 @@ def morning_report(date_str, plan, rejected, risk_rules, pause,
         lines.append("_今日不操作，保存本金，等待信号。_")
         return "\n".join(lines)
 
-    if sentiment_bad:
-        lines.append("🧊 **亏钱效应触发市场总开关：今日整体空仓，不买入**")
+    if sentiment_bad or promo_bad:
+        reason = "亏钱效应" if sentiment_bad else \
+            f"晋级率{promotion_rate*100:.0f}%（接力退潮）"
+        lines.append(f"🧊 **{reason}触发市场总开关：今日整体空仓，不买入**")
         lines.append("")
         lines.append("_打板策略的回撤是集群式的，退潮期最好的操作是不操作。_")
         return "\n".join(lines)

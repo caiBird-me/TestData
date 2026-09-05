@@ -30,8 +30,14 @@ strategy:
   max_candidates: 5           # 晚间输出候选池上限
   final_picks: 2              # 早间最终作战计划股票数上限
   sentiment_threshold: 0     # 市场总开关：昨日涨停股今日平均涨幅低于此值(%)则整体空仓
+  promotion_rate_min: 0.15   # 晋级率总开关：昨日涨停今日再涨停比例低于15%（接力退潮）则整体空仓
   slippage_pct: 0.003        # 虚拟盘买入滑点0.3%：竞价价是虚拟撮合价，
                              # 真实成交在09:30后市价，强势股往往快速上冲
+
+# 历史事件回测（py src/main.py backtest，建议云端Actions跑——本地网络push2his不通）
+backtest:
+  workers: 6                # 全市场日K并发拉取线程数
+  max_events_per_day: 2     # 每日模拟事件上限（对应实盘 max_stocks）
 
 notify:
   # ⚠️ 出于安全考虑，SendKey 不写入本文件（会随git推送到云端造成泄露）。

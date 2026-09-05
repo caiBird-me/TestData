@@ -65,20 +65,64 @@ def in_themes(stock, theme_names, concept_map=None):
     return (stock.get("board") or "").strip() in theme_names
 
 
+# ---------- 封板质量（涨停池数据） ----------
+
+def seal_quality_bonus(seal):
+    """封板质量打分：封板越早、越坚决、封单越厚的板，次日溢价越高。
+
+    seal: 涨停池条目 {first_seal, breaks, seal_amount, ltsz}
+      - first_seal: 首次封板时间 HHMMSS（092500=竞价秒板，103000前算早封）
+      - breaks: 炸板次数（炸板=分歧，回封也算但质量降级）
+      - seal_amount/ltsz: 封单额占流通市值比（封单厚度）
+    """
+    if not seal:
+        return 0
+    bonus = 0
+    fs, breaks = seal.get("first_seal") or 0, seal.get("breaks") or 0
+    if fs <= 92559:        # 竞价/开盘瞬间封板（一字或秒板）
+        bonus += 10
+    elif fs <= 100000:     # 10:00 前封板：强势
+        bonus += 8
+    elif fs <= 103000:     # 10:30 前：正常偏强
+        bonus += 4
+    if breaks == 0:        # 全天未炸板：一致性强
+        bonus += 5
+    elif breaks >= 2:       # 多次炸板：分歧大，次日溢价差
+        bonus -= 8
+    ltsz = seal.get("ltsz") or 0
+    if ltsz and (seal.get("seal_amount") or 0) / ltsz >= 0.03:
+        bonus += 5         # 封单额≥流通市值3%：资金锁仓坚决
+    return bonus
+
+
+def _seal_of(code, zt_map):
+    s = zt_map.get(code)
+    if not s:
+        return None
+    return {
+        "first_seal": s["first_seal"], "breaks": s["breaks"],
+        "seal_amount": s["seal_amount"], "ltsz": s["ltsz"],
+    }
+
+
 # ---------- 晚间选股 ----------
 
-def evening_picks(stocks, limit_ups, streak_map, themes, cfg, concept_map=None):
+def evening_picks(stocks, limit_ups, streak_map, themes, cfg, concept_map=None,
+                  zt_pool=None):
     """晚间复盘选股：从主线题材中选候选池。
 
     A. 连板核心 —— 2板及以上（打分曲线：2-3板最优，5板以上降权）
     B. 主线首板 —— 涨停且题材在主线上
     C. 强势突破 —— 主线内、涨幅>5%、放量（换手分档）、主力净流入加分（非硬条件）
 
+    zt_pool: 东财涨停池（封板质量数据）。封板时间/炸板/封单影响打分——
+    早封+零炸板的板次日溢价显著高于烂板（尾盘偷袭板）。
     返回候选列表（带打分与计划），按 score 降序
     """
     st = cfg["strategy"]
     theme_names = {t["name"] for t in themes}
     rk = cfg.get("_risk")  # 由 main 注入
+    zt_map = {s["code"]: s for s in (zt_pool or [])}
     picks = []
 
     def basic_ok(s):
@@ -102,10 +146,12 @@ def evening_picks(stocks, limit_ups, streak_map, themes, cfg, concept_map=None):
         # 主力净流入是高噪声指标，只作加分不作硬条件
         if s["main_inflow"] > 5e7:
             score += 8
+        score += seal_quality_bonus(_seal_of(s["code"], zt_map))
         picks.append(_make_pick(s, kind, streak, score,
-                                _theme_of(s, theme_names, concept_map), cfg))
+                                _theme_of(s, theme_names, concept_map), cfg,
+                                zt_map.get(s["code"])))
 
-    # C. 强势突破（非涨停）
+    # C. 强势突破（非涨停，无封板质量数据）
     for s in stocks:
         if is_limit_up(s):
             continue
@@ -140,7 +186,7 @@ def _theme_of(stock, theme_names, concept_map):
     return (stock.get("board") or "").strip()
 
 
-def _make_pick(stock, kind, streak, score, board, cfg):
+def _make_pick(stock, kind, streak, score, board, cfg, seal=None):
     """生成候选对象的统一结构"""
     price = stock["price"]
     # 计划买入价区间：今日收盘价 ±2%
@@ -162,6 +208,7 @@ def _make_pick(stock, kind, streak, score, board, cfg):
         "vol_ratio": stock["vol_ratio"],
         "main_inflow": stock["main_inflow"],
         "pct": stock["pct"],
+        "seal": seal,           # 封板质量 {first_seal, breaks, seal_amount, ltsz}
     }
 
 

@@ -351,6 +351,162 @@ def calc_sentiment():
     return round(sum(pcts) / len(pcts), 2), len(codes)
 
 
+# ---------- 涨停池（封板质量 + 晋级率） ----------
+
+def fetch_zt_pool(date_str=None):
+    """东财涨停池：当日涨停股名单 + 封板质量字段。
+
+    date_str: 'YYYYMMDD'，默认最近交易日（接口只保留约3周历史）。
+    返回 [{code,name,price,pct,first_seal(首次封板时间HHMMSS),
+           breaks(炸板次数), seal_amount(封单额,元), streak(连板数),
+           turnover,ltsz}]；失败返回 []。
+
+    这是打板体系里比"涨幅榜自算涨停"更强的口径——
+    直接给出封板时间/炸板次数/封单额（封板质量）和官方连板数。
+    """
+    if not date_str:
+        date_str = get_last_trade_date()
+    data = _get(
+        "https://push2ex.eastmoney.com/getTopicZTPool",
+        {
+            "ut": "7eea3edcaed734bea9cbfc24409ed989", "dpt": "wz.ztzt",
+            "Pageindex": 0, "pagesize": 1000, "sort": "fbt:asc",
+            "date": date_str,
+        },
+    )
+    pool = []
+    if data and data.get("pool"):
+        for s in data["pool"]:
+            pool.append({
+                "code": str(s.get("c", "")).zfill(6),
+                "name": s.get("n", ""),
+                "price": _f(s.get("p")) / 1000 if s.get("p") else 0,
+                "pct": _f(s.get("zdp")),
+                "first_seal": int(s.get("fbt") or 0),   # 首次封板时间 HHMMSS
+                "breaks": int(s.get("zbc") or 0),      # 炸板次数
+                "seal_amount": _f(s.get("fund")),      # 封单额（元）
+                "streak": int(s.get("lbc") or 1),      # 连板数（官方口径）
+                "turnover": _f(s.get("hs")),
+                "ltsz": _f(s.get("ltsz")),             # 流通市值
+            })
+    return pool
+
+
+def save_zt_archive(pool, date_str=None):
+    """涨停池归档到 data/history/YYYYMMDD_zt.json（小文件，长期保留，
+    晋级率/连板验证/将来回测都用得上）"""
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    if not date_str:
+        date_str = now_cn().strftime("%Y%m%d")
+    path = HISTORY_DIR / f"{date_str}_zt.json"
+    path.write_text(json.dumps({"date": date_str, "pool": pool}, ensure_ascii=False),
+                    encoding="utf-8")
+    return path
+
+
+def load_zt_archive(date_str):
+    """读取某日涨停池归档，返回 pool 列表（无归档返回 None）"""
+    path = HISTORY_DIR / f"{date_str}_zt.json"
+    if not path.exists():
+        return None
+    try:
+        js = json.loads(path.read_text(encoding="utf-8"))
+        return js.get("pool")
+    except ValueError:
+        return None
+
+
+def calc_promotion_rate(today_pool=None):
+    """晋级率：昨日涨停股今日继续涨停的比例（比"昨日涨停今日均涨幅"更前瞻——
+    均涨幅为正可能是炸板大跌拉平的假象，晋级率直接反映接力意愿）。
+
+    分母（昨日涨停名单）优先级：昨日涨停池归档 > 接口拉取 > 每日归档。
+    返回 (晋级率0~1, 昨日涨停数, 晋级数)；数据不足返回 (None, 0, 0)。
+    """
+    if today_pool is None:
+        today_pool = fetch_zt_pool()
+    if not today_pool:
+        return None, 0, 0
+
+    prev_date = get_prev_trade_date()
+    yesterday_codes = None
+    if prev_date:
+        ypool = load_zt_archive(prev_date) or fetch_zt_pool(prev_date)
+        if ypool:
+            yesterday_codes = {s["code"] for s in ypool}
+    if yesterday_codes is None:
+        prev = load_prev_limit_ups(1)
+        if not prev:
+            return None, 0, 0
+        yesterday_codes = set(next(iter(prev.values())))
+    if not yesterday_codes:
+        return None, 0, 0
+
+    today_codes = {s["code"] for s in today_pool}
+    promoted = len(yesterday_codes & today_codes)
+    return round(promoted / len(yesterday_codes), 3), len(yesterday_codes), promoted
+
+
+def cleanup_archives(keep_raw_days=10, keep_zt_days=90):
+    """归档保留策略：原始数据(*_raw.json)只留最近 keep_raw_days 天（一天上百KB，
+    全量保留会让仓库膨胀；10天足够"口径改了能重算"），涨停池归档留 keep_zt_days 天。
+    其余归档（YYYYMMDD.json 每日涨停/强势股名单）很小，永久保留。
+
+    返回删除的文件数。
+    """
+    if not HISTORY_DIR.exists():
+        return 0
+    today = now_cn().strftime("%Y%m%d")
+
+    def _days_old(name):
+        date_part = name.split("_")[0]
+        try:
+            d0 = datetime.strptime(date_part, "%Y%m%d")
+            d1 = datetime.strptime(today, "%Y%m%d")
+            return (d1 - d0).days
+        except ValueError:
+            return 0
+
+    removed = 0
+    for f in HISTORY_DIR.glob("*.json"):
+        if f.stem.endswith("_raw") and _days_old(f.name) > keep_raw_days:
+            f.unlink()
+            removed += 1
+        elif f.stem.endswith("_zt") and _days_old(f.name) > keep_zt_days:
+            f.unlink()
+            removed += 1
+    return removed
+
+
+def fetch_universe():
+    """全市场A股代码清单（回测用）：返回 [(code, secid)]，按代码排序。
+
+    注意：clist 只返回当前存续股票——2019年以来退市的股票不在其中，
+    回测存在幸存者偏差（退市股多为问题股，会使结果略偏乐观，需在报告中披露）。
+    """
+    out = []
+    for pn in range(1, 80):
+        data = _get(
+            "https://push2.eastmoney.com/api/qt/clist/get",
+            {
+                "pn": pn, "pz": 100, "po": 1, "np": 1,
+                "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+                "fltt": 2, "invt": 2, "fid": "f12", "fs": FS_ASHARE,
+                "fields": "f12",
+            },
+        )
+        if not data or not data.get("diff"):
+            break
+        for s in data["diff"]:
+            code = str(s.get("f12", "")).zfill(6)
+            secid = code_to_secid(code)
+            if secid:
+                out.append((code, secid))
+        if len(data["diff"]) < 100:
+            break
+    return sorted(set(out))
+
+
 def fetch_boards():
     """行业+概念板块行情，返回按涨幅排序的板块列表"""
     data = _get(
@@ -375,18 +531,37 @@ def fetch_boards():
     return boards
 
 
-def get_last_trade_date():
-    """用沪深300指数日K推断最近交易日，返回 YYYYMMDD 字符串"""
+def _index_recent_dates(n=5):
+    """沪深300日K最近n个交易日（YYYYMMDD列表），失败返回 []"""
     data = _get(
         "https://push2his.eastmoney.com/api/qt/stock/kline/get",
         {
             "secid": "1.000300", "fields1": "f1", "fields2": "f51,f53",
-            "klt": 101, "fqt": 1, "end": "20500101", "lmt": 5,
+            "klt": 101, "fqt": 1, "end": "20500101", "lmt": n,
         },
     )
     if data and data.get("klines"):
-        return data["klines"][-1].split(",")[0].replace("-", "")
+        return [k.split(",")[0].replace("-", "") for k in data["klines"]]
+    return []
+
+
+def get_last_trade_date():
+    """用沪深300指数日K推断最近交易日，返回 YYYYMMDD 字符串"""
+    dates = _index_recent_dates()
+    if dates:
+        return dates[-1]
     return now_cn().strftime("%Y%m%d")
+
+
+def get_prev_trade_date():
+    """最近一个已收盘交易日的前一个交易日（YYYYMMDD），失败返回 None。
+
+    用于晋级率的分母（昨日涨停名单）。
+    """
+    dates = _index_recent_dates()
+    if len(dates) >= 2:
+        return dates[-2]
+    return None
 
 
 # ---------- 每日归档（用于自算连板数） ----------

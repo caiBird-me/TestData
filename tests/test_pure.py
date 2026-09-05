@@ -267,7 +267,38 @@ class TestCosts(unittest.TestCase):
         self.assertLess(pnl, 0)  # 500仓位涨1%=5元利润 < 10.25成本
 
 
-class TestMorningConfirm(unittest.TestCase):
+class TestSealQuality(unittest.TestCase):
+    """封板质量打分：早封/零炸/厚封单加分，烂板降分"""
+
+    def _seal(self, fs=100000, breaks=0, amount=5e7, ltsz=1e9):
+        return {"first_seal": fs, "breaks": breaks, "seal_amount": amount, "ltsz": ltsz}
+
+    def test_instant_seal_best(self):
+        from strategy import seal_quality_bonus
+        b = seal_quality_bonus(self._seal(fs=92500))
+        self.assertGreaterEqual(b, 15)  # 秒板+零炸+厚封单
+
+    def test_late_board_worse(self):
+        from strategy import seal_quality_bonus
+        self.assertGreater(seal_quality_bonus(self._seal(fs=100000)),
+                           seal_quality_bonus(self._seal(fs=143000)))
+
+    def test_breaks_penalty(self):
+        from strategy import seal_quality_bonus
+        self.assertGreater(seal_quality_bonus(self._seal(breaks=0)),
+                           seal_quality_bonus(self._seal(breaks=3)))
+
+    def test_thin_seal_no_bonus(self):
+        from strategy import seal_quality_bonus
+        # 封单占流通市值<3% 无厚度加分
+        self.assertEqual(seal_quality_bonus(self._seal(amount=1e6)), 13)  # 8+5, 无厚度分
+
+    def test_none(self):
+        from strategy import seal_quality_bonus
+        self.assertEqual(seal_quality_bonus(None), 0)
+
+
+
     """morning_confirm 三层过滤：gap / buy_range / 成交可行性"""
 
     def _cfg(self):
@@ -315,6 +346,101 @@ class TestMorningConfirm(unittest.TestCase):
         cand["buy_range"] = [9.8, 10.6]
         plan, _ = morning_confirm([cand], snap, self._cfg(), fm)
         self.assertFalse(plan[0].get("unfillable", False))
+
+
+class TestBacktest(unittest.TestCase):
+    """回测纯函数：涨停判定、事件模拟（T+1/止损/续持/gap过滤/成本）"""
+
+    def _bars(self):
+        """构造一段合成日K：D日涨停 → D+1高开3% → D+2平收"""
+        return [
+            {"date": "2026-09-01", "open": 9.5, "close": 10.0, "high": 10.0,
+             "low": 9.4, "volume": 100, "pct": 9.9},
+            {"date": "2026-09-02", "open": 10.3, "close": 10.4, "high": 10.5,
+             "low": 10.2, "volume": 100, "pct": 4.0},
+            {"date": "2026-09-03", "open": 10.4, "close": 10.4, "high": 10.6,
+             "low": 10.3, "volume": 100, "pct": 0.0},
+            {"date": "2026-09-04", "open": 10.4, "close": 10.2, "high": 10.7,
+             "low": 10.0, "volume": 100, "pct": -1.9},
+        ]
+
+    def _costs(self):
+        return {"commission_rate": 0.00025, "commission_min": 5.0, "stamp_duty": 0.0005}
+
+    def test_limit_threshold(self):
+        from backtest import limit_threshold
+        self.assertEqual(limit_threshold("600000"), 9.85)
+        self.assertEqual(limit_threshold("300001"), 19.85)
+        self.assertEqual(limit_threshold("688001"), 19.85)
+        self.assertEqual(limit_threshold("830001"), 29.7)
+
+    def test_build_events(self):
+        from backtest import build_events
+        ev = build_events({"600000": self._bars()}, 2026, 2026)
+        self.assertIn("2026-09-01", ev)
+        self.assertEqual(ev["2026-09-01"][0][1], 1)  # 首板
+
+    def test_streak_counting(self):
+        from backtest import build_events
+        bars = [
+            {"date": f"2026-09-0{i}", "open": 10, "close": 11, "high": 11,
+             "low": 10, "volume": 1, "pct": 10.0}
+            for i in range(1, 4)
+        ] + self._bars()[2:]
+        ev = build_events({"600000": bars}, 2026, 2026)
+        self.assertEqual(ev["2026-09-03"][0][1], 3)  # 3连板
+
+    def test_gap_filter_rejects_one_word_board(self):
+        from backtest import simulate_event
+        bars = [
+            {"date": "2026-09-01", "open": 9.5, "close": 10.0, "high": 10.0,
+             "low": 9.4, "volume": 1, "pct": 9.9},
+            # D+1 一字板：高开10%（>7%上限，买不进也不该追）
+            {"date": "2026-09-02", "open": 11.0, "close": 11.0, "high": 11.0,
+             "low": 11.0, "volume": 1, "pct": 10.0},
+        ] + self._bars()[2:]
+        self.assertIsNone(simulate_event("600000", bars, 0, self._costs()))
+
+    def test_normal_event_with_costs(self):
+        from backtest import simulate_event
+        r = simulate_event("600000", self._bars(), 0, self._costs())
+        self.assertIsNotNone(r)
+        self.assertEqual(r["reason"], "收盘卖出")
+        # 买入 10.3*1.003=10.33，卖出10.4：毛利0.7%被最低佣金吞掉大半
+        self.assertEqual(r["shares"], 100)
+        self.assertLess(r["pnl_pct"], 0.7)
+        self.assertGreater(r["pnl_pct"], -0.5)
+
+    def test_stop_loss(self):
+        from backtest import simulate_event
+        bars = self._bars()
+        # D+2 盘中砸到-5%以下
+        bars[2] = {"date": "2026-09-03", "open": 10.4, "close": 9.9, "high": 10.4,
+                   "low": 9.5, "volume": 1, "pct": -4.8}
+        r = simulate_event("600000", bars, 0, self._costs())
+        self.assertEqual(r["reason"], "止损")
+        # 止损价 = 10.33 * 0.95 ≈ 9.81
+        self.assertAlmostEqual(r["sell_price"], 9.81, places=1)
+
+    def test_limit_up_hold(self):
+        from backtest import simulate_event
+        bars = self._bars()
+        # D+2 收盘涨停 → 续持到 D+3
+        bars[2] = {"date": "2026-09-03", "open": 10.4, "close": 11.44, "high": 11.44,
+                   "low": 10.3, "volume": 1, "pct": 10.0}
+        r = simulate_event("600000", bars, 0, self._costs())
+        self.assertEqual(r["days"], 2)
+        self.assertEqual(r["sell_price"], 10.2)  # D+3 收盘
+
+    def test_too_expensive_skipped(self):
+        from backtest import simulate_event
+        bars = [
+            {"date": "2026-09-01", "open": 19.0, "close": 20.0, "high": 20.0,
+             "low": 19.0, "volume": 1, "pct": 9.9},
+            {"date": "2026-09-02", "open": 20.4, "close": 20.5, "high": 20.6,
+             "low": 20.2, "volume": 1, "pct": 2.5},
+        ] + self._bars()[2:]
+        self.assertIsNone(simulate_event("600000", bars, 0, self._costs()))
 
 
 if __name__ == "__main__":

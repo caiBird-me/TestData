@@ -9,3 +9,6 @@ __pycache__/
 # 临时文件
 _test*.json
 _t*.json
+
+# 回测K线缓存（5400只×几十KB，进仓库会膨胀到几百MB；report.json 摘要保留）
+data/backtest/klines/
