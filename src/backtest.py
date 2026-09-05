@@ -28,6 +28,7 @@
 """
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -60,11 +61,16 @@ def _session():
 
 def _fetch_stock_kline(code, lmt=2200):
     """单只股票全量日K（前复权，含官方涨跌幅f59）。
-    2200根约覆盖9年，足够2019年起回测。"""
+    2200根约覆盖9年，足够2019年起回测。
+
+    失败退避：东财对海外IP（GitHub Actions）限流时请求会超时，
+    无退避的立即重试只会火上浇油——sleep后再试。
+    """
     secid = code_to_secid(code)
     if not secid:
         return None
-    for _ in range(3):
+    backoffs = (2, 5)
+    for attempt in range(3):
         try:
             r = _session().get(
                 "https://push2his.eastmoney.com/api/qt/stock/kline/get",
@@ -73,7 +79,7 @@ def _fetch_stock_kline(code, lmt=2200):
                     "fields2": "f51,f52,f53,f54,f55,f56,f59",
                     "klt": 101, "fqt": 1, "end": "20500101", "lmt": lmt,
                 },
-                timeout=20,
+                timeout=(10, 20),  # 连接10s/读取20s，连接被拒时快速失败
             )
             js = r.json()
             data = js.get("data")
@@ -88,7 +94,8 @@ def _fetch_stock_kline(code, lmt=2200):
                     })
                 return bars
         except Exception:
-            continue
+            if attempt < 2:
+                time.sleep(backoffs[attempt])
     return None
 
 
@@ -98,6 +105,9 @@ def fetch_all_klines(universe, workers=6, cache=True, on_progress=None):
     缓存 data/backtest/klines/{code}.json：{fetched: 拉取日, bars: [...]}，
     当天已拉取的跳过（断点续传：5400只×几十KB，中断后重跑只补失败的部分）。
     注意：缓存不进git（仓库会膨胀到几百MB），云端每次dispatch全量拉取约10-20分钟。
+
+    限流自适应：单只拉取失败（超时/被拒）说明东财在限流——
+    该worker暂停2秒再放下一个请求，避免雪崩式失败。
     """
     if cache:
         KLINE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -105,6 +115,7 @@ def fetch_all_klines(universe, workers=6, cache=True, on_progress=None):
     result, failed = {}, []
     codes = [c for c, _ in universe]
     done = 0
+    t0 = time.monotonic()
 
     def work(code):
         if cache:
@@ -117,7 +128,9 @@ def fetch_all_klines(universe, workers=6, cache=True, on_progress=None):
                 except ValueError:
                     pass
         bars = _fetch_stock_kline(code)
-        if bars and cache:
+        if bars is None:
+            time.sleep(2)  # 失败≈被限流信号，让路
+        elif cache:
             cf = KLINE_CACHE_DIR / f"{code}.json"
             cf.write_text(json.dumps({"fetched": today, "bars": bars}), encoding="utf-8")
         return code, bars
@@ -131,8 +144,8 @@ def fetch_all_klines(universe, workers=6, cache=True, on_progress=None):
                 result[code] = bars
             else:
                 failed.append(code)
-            if on_progress and (done % 500 == 0 or done == len(codes)):
-                on_progress(done, len(codes), len(failed))
+            if on_progress and (done % 200 == 0 or done == len(codes)):
+                on_progress(done, len(codes), len(failed), time.monotonic() - t0)
     return result, failed
 
 
@@ -237,8 +250,11 @@ def run_backtest(cfg, start_year=None, end_year=None):
     print(f"[backtest] {len(universe)} 只股票，拉取日K（{start_year}-{end_year}，并发"
           f"{st.get('workers', 6)}）...")
 
-    def progress(done, total, failed):
-        print(f"[backtest] K线 {done}/{total}（失败{failed}）")
+    def progress(done, total, failed, elapsed):
+        rate = done / elapsed if elapsed else 0
+        eta = int((total - done) / rate) if rate else 0
+        print(f"[backtest] K线 {done}/{total}（失败{failed}）"
+              f" {rate:.0f}只/秒，预计还需{eta//60}分{eta%60}秒")
 
     klines, failed = fetch_all_klines(universe, workers=st.get("workers", 6),
                                       on_progress=progress)
