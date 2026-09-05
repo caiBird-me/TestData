@@ -63,7 +63,7 @@ def run_evening(cfg):
     print(f"[evening] 样本{len(stocks)}只，涨停{len(limit_ups)}只")
 
     # ---------- 1. 先结算持仓（止损 / T+1尾盘卖出 / 涨停续持） ----------
-    portfolio = pf.Portfolio(cfg["capital"]["total"])
+    portfolio = pf.Portfolio(cfg["capital"]["total"], cfg.get("trading_costs"))
     settlements = []
     if portfolio.data["positions"]:
         held_codes = list(portfolio.held_codes())
@@ -125,7 +125,7 @@ def run_morning(cfg):
         print("[morning] 今日非交易日（行情时间戳未更新），跳过")
         return 0
 
-    portfolio = pf.Portfolio(cfg["capital"]["total"])
+    portfolio = pf.Portfolio(cfg["capital"]["total"], cfg.get("trading_costs"))
     pending = portfolio.pending_signals()
 
     # 信号过期检查：信号次日有效，过时不候。
@@ -149,7 +149,34 @@ def run_morning(cfg):
 
     print(f"[morning] 待确认信号 {len(pending)} 个，拉取实时行情 ...")
     codes = [s["code"] for s in pending]
-    snapshot = ds.fetch_snapshot_by_codes(codes)
+    # 持仓也要拉行情：竞价时点处理昨日买入的票（T+1今日可卖）
+    held_codes = list(portfolio.held_codes())
+    snapshot = ds.fetch_snapshot_by_codes(list(set(codes) | set(held_codes)))
+
+    # ---------- 持仓竞价处理（在买入之前，卖出释放的资金当日可用） ----------
+    # a) 竞价跌破止损价 → 竞价卖出（不等收盘：盘中跌停当日-10%，收盘才检查会深亏）
+    # b) 高开>7% → 锁定隔夜溢价卖出（与买入侧"高开>7%不追"对称：
+    #    超高开的隔夜溢价已透支，次日追入期望为负——反过来，持有的票在超高开
+    #    兑现正是这个溢价的最佳收割点。代价是错过后续连板，机械执行接受）
+    position_actions = []
+    for p in portfolio.data["positions"]:
+        s = snapshot.get(p["code"])
+        if not s or s["price"] <= 0 or s["pre_close"] <= 0:
+            continue
+        gap = (s["price"] - s["pre_close"]) / s["pre_close"]
+        stop = p.get("stop_loss") or 0
+        if stop and s["price"] <= stop:
+            pnl, pnl_pct = portfolio.sell(p["code"], s["price"], "竞价破止损，开盘卖出")
+            position_actions.append(
+                (p["name"], p["code"], f"🔴 竞价跌破止损{stop}元，开盘卖出", pnl_pct))
+        elif gap >= rules.max_gap_up_pct:
+            pnl, pnl_pct = portfolio.sell(p["code"], s["price"], "高开>7%，锁定隔夜溢价")
+            position_actions.append(
+                (p["name"], p["code"], f"🟢 高开{gap*100:.1f}%，开盘卖出锁定利润", pnl_pct))
+    for name, code, action, pnl_pct in position_actions:
+        print(f"[morning] 持仓处理: {name} {action} ({pnl_pct:+.2f}%)")
+    if position_actions:
+        portfolio.save()
 
     # 市场情绪总开关：昨日涨停股今日平均表现 < 0 = 亏钱效应，整体空仓
     sentiment, lu_count = ds.calc_sentiment()
@@ -176,7 +203,8 @@ def run_morning(cfg):
     portfolio.save()
 
     md = report.morning_report(date_str, plan, rejected, rules,
-                               pause_reason if pause else None, sentiment, sentiment_bad)
+                               pause_reason if pause else None, sentiment, sentiment_bad,
+                               position_actions)
     notify.send(cfg, f"竞价确认 {date_str}", md)
     return 0
 
@@ -185,7 +213,7 @@ def run_stats(cfg):
     """统计"""
     rules = RiskRules(cfg)
     date_str = now_cn().strftime("%Y-%m-%d")
-    portfolio = pf.Portfolio(cfg["capital"]["total"])
+    portfolio = pf.Portfolio(cfg["capital"]["total"], cfg.get("trading_costs"))
 
     codes = [p["code"] for p in portfolio.data["positions"]]
     snapshot = ds.fetch_snapshot_by_codes(codes) if codes else {}

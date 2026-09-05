@@ -80,9 +80,16 @@ def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settle
 
 
 def morning_report(date_str, plan, rejected, risk_rules, pause,
-                   sentiment=None, sentiment_bad=False):
+                   sentiment=None, sentiment_bad=False, position_actions=None):
     """早间作战计划报告"""
     lines = [f"## ⚔️ 今日作战计划 {date_str}", ""]
+
+    # 持仓竞价处理（卖出指令优先展示）
+    if position_actions:
+        lines.append("**📤 持仓处理（竞价已执行，请同步手动卖出）**")
+        for name, code, action, pnl_pct in position_actions:
+            lines.append(f"- {name}({code}): {action}，**{pnl_pct:+.2f}%**")
+        lines.append("")
 
     # 市场情绪总开关
     if sentiment is not None:
@@ -135,6 +142,9 @@ def stats_report(date_str, stats, portfolio, mv):
     lines.append(f"- 总市值: **{mv:.2f}元**（本金{initial}元，累计**{ret_pct:+.2f}%**）")
     lines.append(f"- 可用现金: {portfolio['cash']:.2f}元")
     lines.append(f"- 当前持仓: {len(portfolio['positions'])} 只")
+    costs = portfolio.get("total_costs", 0)
+    if costs:
+        lines.append(f"- 累计交易成本: {costs:.2f}元（佣金+印花税，已计入盈亏）")
     lines.append("")
     if stats["total"] == 0:
         lines.append("已结算信号: 0（跑几天后这里会有胜率数据）")

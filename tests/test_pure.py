@@ -231,5 +231,41 @@ class TestConceptThemes(unittest.TestCase):
         self.assertFalse(in_themes(make_stock("600099", 5, 10, 10), names, cmap))
 
 
+class TestCosts(unittest.TestCase):
+    """交易成本建模：3k资金的最低佣金是重税，必须计入虚拟盘"""
+
+    def _pf(self):
+        from portfolio import Portfolio
+        return Portfolio(3000)
+
+    def test_round_trip_costs(self):
+        """1000元仓位一轮买卖：买佣5 + 卖佣5 + 印花税0.5 = 总成本10.5元"""
+        p = self._pf()
+        p.buy("600000", "测试", 10.0, 100, date_str="2026-09-01")
+        # 买入：1000元 + 5元佣金，现金 3000-1005=1995
+        self.assertAlmostEqual(p.data["cash"], 1995.0)
+        pnl, pnl_pct = p.sell("600000", 10.0)  # 平价卖出
+        # 卖出净额 = 1000 - (5 + 0.5) = 994.5；盈亏 = 994.5 - 1005 = -10.5
+        self.assertAlmostEqual(pnl, -10.5)
+        self.assertAlmostEqual(p.data["total_costs"], 10.5)
+        self.assertAlmostEqual(p.data["cash"], 1995.0 + 994.5)
+
+    def test_cost_drag_on_small_position(self):
+        """5.6元股100股（560元仓位）成本拖累：平价买卖亏1.9%"""
+        p = self._pf()
+        p.buy("600975", "测试", 5.6, 100, date_str="2026-09-01")
+        pnl, pnl_pct = p.sell("600975", 5.6)
+        # 成本10.53元 / 560元仓位 ≈ 1.9%
+        self.assertLess(pnl_pct, -1.8)
+        self.assertGreater(pnl_pct, -2.0)
+
+    def test_gross_profit_can_be_eaten(self):
+        """涨1%但仓位只有500元时，成本吞掉全部利润"""
+        p = self._pf()
+        p.buy("600001", "测试", 5.0, 100, date_str="2026-09-01")
+        pnl, pnl_pct = p.sell("600001", 5.05)  # +1%
+        self.assertLess(pnl, 0)  # 500仓位涨1%=5元利润 < 10.25成本
+
+
 if __name__ == "__main__":
     unittest.main()

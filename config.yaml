@@ -3,6 +3,13 @@
 capital:
   total: 3000          # 总本金（元）
 
+# 交易成本（虚拟盘计入，保证验证数据真实——3k资金每笔几乎都触发最低佣金，
+# 一轮买卖约11元≈1500元仓位的0.73%，不计成本会系统性高估收益）
+trading_costs:
+  commission_rate: 0.00025   # 佣金万2.5
+  commission_min: 5.0        # 单笔最低5元
+  stamp_duty: 0.0005         # 印花税万5（仅卖出）
+
 risk:
   max_position_pct: 0.50     # 单票最大仓位占比（约1500元）
   max_stocks: 2              # 同日最多持仓股票数

@@ -29,46 +29,75 @@ def _save(path, obj):
 
 
 class Portfolio:
-    def __init__(self, capital):
+    # 默认交易成本：佣金万2.5最低5元/笔，印花税万5（仅卖出）。
+    # 3k资金每笔几乎都触发5元最低佣金——一轮买卖约11元（占1500元仓位0.73%），
+    # 不计成本的虚拟盘会系统性高估收益率。
+    DEFAULT_COSTS = {
+        "commission_rate": 0.00025,
+        "commission_min": 5.0,
+        "stamp_duty": 0.0005,
+    }
+
+    def __init__(self, capital, costs=None):
         self.path = DATA_DIR / "portfolio.json"
         self.signals_path = DATA_DIR / "signals.json"
         d = _load(self.path, None)
         if d is None:
             d = {"cash": capital, "positions": [], "initial_capital": capital}
+        # 兼容旧数据文件：无 total_costs 字段时初始化
+        d.setdefault("total_costs", 0.0)
         self.data = d
         self.signals = _load(self.signals_path, [])
+        self.costs = {**self.DEFAULT_COSTS, **(costs or {})}
 
     # ---------- 持仓 ----------
 
     def held_codes(self):
         return {p["code"] for p in self.data["positions"]}
 
+    def _buy_fee(self, amount):
+        return round(max(amount * self.costs["commission_rate"],
+                         self.costs["commission_min"]), 2)
+
+    def _sell_fee(self, amount):
+        return round(max(amount * self.costs["commission_rate"],
+                         self.costs["commission_min"])
+                    + amount * self.costs["stamp_duty"], 2)
+
     def buy(self, code, name, price, shares, board="", kind="", stop_loss=0, date_str=None):
-        """虚拟买入"""
+        """虚拟买入（含买入佣金）"""
         amount = round(price * shares, 2)
-        if amount > self.data["cash"]:
-            # 买不起就减股数
-            shares = int(self.data["cash"] // (price * 100)) * 100
+        fee = self._buy_fee(amount)
+        if amount + fee > self.data["cash"]:
+            # 买不起就减股数（留足佣金）
+            shares = int((self.data["cash"] - fee) // (price * 100)) * 100
             if shares <= 0:
                 return None
             amount = round(price * shares, 2)
-        self.data["cash"] = round(self.data["cash"] - amount, 2)
+            fee = self._buy_fee(amount)
+        self.data["cash"] = round(self.data["cash"] - amount - fee, 2)
+        self.data["total_costs"] = round(self.data["total_costs"] + fee, 2)
         pos = {
             "code": code, "name": name, "buy_price": price, "shares": shares,
-            "amount": amount, "buy_date": date_str or now_cn().strftime("%Y-%m-%d"),
+            "amount": amount, "buy_cost": fee,
+            "buy_date": date_str or now_cn().strftime("%Y-%m-%d"),
             "board": board, "kind": kind, "stop_loss": stop_loss,
         }
         self.data["positions"].append(pos)
         return pos
 
     def sell(self, code, price, reason=""):
-        """虚拟卖出全部持仓，返回盈亏%"""
+        """虚拟卖出全部持仓（含卖出佣金+印花税），返回 (盈亏, 盈亏%)"""
         for i, p in enumerate(self.data["positions"]):
             if p["code"] == code:
-                amount = round(price * p["shares"], 2)
-                pnl = round(amount - p["amount"], 2)
-                pnl_pct = round((price - p["buy_price"]) / p["buy_price"] * 100, 2)
-                self.data["cash"] = round(self.data["cash"] + amount, 2)
+                gross = round(price * p["shares"], 2)
+                fee = self._sell_fee(gross)
+                net = round(gross - fee, 2)
+                invested = p["amount"] + p.get("buy_cost", 0)
+                pnl = round(net - invested, 2)
+                pnl_pct = round(pnl / invested * 100, 2) if invested > 0 else 0.0
+                self.data["cash"] = round(self.data["cash"] + net, 2)
+                self.data["total_costs"] = round(self.data["total_costs"] + fee, 2)
                 self.data["positions"].pop(i)
                 self._settle_signal(code, price, pnl, pnl_pct, reason)
                 return pnl, pnl_pct
