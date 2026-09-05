@@ -9,10 +9,17 @@
 """
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+
+# 统一北京时间（云端 Actions 服务器为 UTC）
+CN_TZ = timezone(timedelta(hours=8))
+
+
+def now_cn():
+    return datetime.now(CN_TZ)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -214,12 +221,12 @@ def get_last_trade_date():
     )
     if data and data.get("klines"):
         return data["klines"][-1].split(",")[0].replace("-", "")
-    return datetime.now().strftime("%Y%m%d")
+    return now_cn().strftime("%Y%m%d")
 
 
 def is_trade_time_evening():
     """收盘复盘是否可运行：非周末即可（节假日由数据空判断）"""
-    return datetime.now().weekday() < 5
+    return now_cn().weekday() < 5
 
 
 # ---------- 每日归档（用于自算连板数） ----------
@@ -227,7 +234,7 @@ def is_trade_time_evening():
 def save_daily_archive(stocks):
     """把当日涨停/强势股归档到 data/history/YYYYMMDD.json"""
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    date_str = datetime.now().strftime("%Y%m%d")
+    date_str = now_cn().strftime("%Y%m%d")
     limit_up = [s for s in stocks if is_limit_up(s)]
     archive = {
         "date": date_str,
@@ -255,7 +262,7 @@ def load_prev_limit_ups(n_days=10):
     if not HISTORY_DIR.exists():
         return result
     files = sorted(HISTORY_DIR.glob("*.json"), reverse=True)[:n_days + 1]
-    today = datetime.now().strftime("%Y%m%d")
+    today = now_cn().strftime("%Y%m%d")
     for f in files:
         try:
             js = json.loads(f.read_text(encoding="utf-8"))

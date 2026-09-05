@@ -8,7 +8,7 @@
 """
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -24,6 +24,13 @@ import strategy
 from risk import RiskRules
 
 CFG_PATH = Path("config.yaml")
+
+# 统一使用北京时间（GitHub Actions 服务器是 UTC，直接用 now() 会把周一早盘误判成周日）
+CN_TZ = timezone(timedelta(hours=8))
+
+
+def now_cn():
+    return datetime.now(CN_TZ)
 
 
 def load_config():
@@ -51,7 +58,7 @@ def run_evening(cfg):
     """收盘复盘：拉数据 → 识别涨停/主线 → 选明日候选 → 登记信号 → 归档 → 推送"""
     rules = RiskRules(cfg)
     cfg["_risk"] = rules
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    date_str = now_cn().strftime("%Y-%m-%d")
 
     print(f"[evening] 拉取全市场涨幅榜 ...")
     stocks = ds.fetch_top_gainers(cfg["strategy"]["top_gainers_pages"])
@@ -81,7 +88,7 @@ def run_evening(cfg):
     pause, pause_reason = rules.need_pause(portfolio.signals)
     if not pause:
         for p in picks:
-            portfolio.register_signal(p, datetime.now().strftime("%Y-%m-%d"))
+            portfolio.register_signal(p, now_cn().strftime("%Y-%m-%d"))
         portfolio.save()
 
     md = report.evening_report(date_str, themes, limit_ups, picks, rules, pause_reason if pause else None)
@@ -93,7 +100,7 @@ def run_morning(cfg):
     """竞价确认：激活pending信号 → 过滤 → 输出作战计划 → 推送"""
     rules = RiskRules(cfg)
     cfg["_risk"] = rules
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    date_str = now_cn().strftime("%Y-%m-%d")
 
     portfolio = pf.Portfolio(cfg["capital"]["total"])
     pending = portfolio.pending_signals()
@@ -136,7 +143,7 @@ def run_morning(cfg):
 def run_stats(cfg):
     """统计"""
     rules = RiskRules(cfg)
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    date_str = now_cn().strftime("%Y-%m-%d")
     portfolio = pf.Portfolio(cfg["capital"]["total"])
 
     codes = [p["code"] for p in portfolio.data["positions"]]
@@ -170,16 +177,16 @@ def main():
         return 1
     cfg = load_config()
     cmd = sys.argv[1]
-    if cmd == "evening":
-        # 非交易日（周末）直接退出
-        if datetime.now().weekday() >= 5:
-            print("[evening] 周末，跳过")
+    # STOCK_FORCE=1 可跳过周末检查（手动测试用）
+    force = os.environ.get("STOCK_FORCE") == "1"
+    if cmd in ("evening", "morning"):
+        # 非交易日（周末，按北京时间判断）直接退出
+        if not force and now_cn().weekday() >= 5:
+            print("[{}] 周末（北京时间），跳过。设置 STOCK_FORCE=1 可强制运行".format(cmd))
             return 0
+    if cmd == "evening":
         return run_evening(cfg)
     if cmd == "morning":
-        if datetime.now().weekday() >= 5:
-            print("[morning] 周末，跳过")
-            return 0
         return run_morning(cfg)
     return run_stats(cfg)
 

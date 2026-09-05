@@ -7,6 +7,8 @@
 """
 import json
 from datetime import datetime
+
+from datasource import now_cn
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -53,7 +55,7 @@ class Portfolio:
         self.data["cash"] = round(self.data["cash"] - amount, 2)
         pos = {
             "code": code, "name": name, "buy_price": price, "shares": shares,
-            "amount": amount, "buy_date": datetime.now().strftime("%Y-%m-%d"),
+            "amount": amount, "buy_date": now_cn().strftime("%Y-%m-%d"),
             "board": board, "kind": kind, "stop_loss": stop_loss,
         }
         self.data["positions"].append(pos)
@@ -118,7 +120,7 @@ class Portfolio:
         for s in reversed(self.signals):
             if s["code"] == code and s["status"] == "holding":
                 s.update({
-                    "status": "settled", "settle_date": datetime.now().strftime("%Y-%m-%d"),
+                    "status": "settled", "settle_date": now_cn().strftime("%Y-%m-%d"),
                     "settle_price": price, "pnl": pnl, "pnl_pct": pnl_pct, "reason": reason,
                 })
                 return
