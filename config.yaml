@@ -36,7 +36,7 @@ strategy:
 
 # 历史事件回测（py src/main.py backtest，建议云端Actions跑——本地网络push2his不通）
 backtest:
-  workers: 6                # 全市场日K并发拉取线程数
+  workers: 3                # 全市场日K并发拉取线程数（6会被东财对海外IP限流，实测92%失败）
   max_events_per_day: 2     # 每日模拟事件上限（对应实盘 max_stocks）
 
 notify:

@@ -69,8 +69,10 @@ def _fetch_stock_kline(code, lmt=2200):
     secid = code_to_secid(code)
     if not secid:
         return None
-    backoffs = (2, 5)
-    for attempt in range(3):
+    # 限流下瞬时重试全灭：指数退避 + 4次尝试（实测海外IP连接层被拒时
+    # 第4次尝试+8秒等待后成功率明显回升）
+    backoffs = (1, 3, 8)
+    for attempt in range(4):
         try:
             r = _session().get(
                 "https://push2his.eastmoney.com/api/qt/stock/kline/get",
