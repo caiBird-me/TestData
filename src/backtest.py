@@ -311,8 +311,9 @@ class _CircuitBreaker:
 
 
 # ---------- K线磁盘缓存（当日有效，断点续传） ----------
+# 公开命名：backtest_lowfreq 复用同一缓存目录（ETF代码51/15开头与股票无碰撞）
 
-def _save_kline_cache(code, bars):
+def save_kline_cache(code, bars):
     try:
         KLINE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         (KLINE_CACHE_DIR / f"{code}.json").write_text(json.dumps(
@@ -321,7 +322,7 @@ def _save_kline_cache(code, bars):
         pass  # 缓存写失败不影响回测本身
 
 
-def _read_kline_cache(code):
+def read_kline_cache(code):
     """读取单只股票的当日缓存，失败返回 None"""
     try:
         js = json.loads((KLINE_CACHE_DIR / f"{code}.json").read_text(encoding="utf-8"))
@@ -332,7 +333,7 @@ def _read_kline_cache(code):
     return None
 
 
-def _cached_codes_today():
+def cached_codes_today():
     """当日有效缓存的code集合（只建索引不读内容，内存安全）。
 
     非当日/损坏的缓存文件直接删除。
@@ -399,7 +400,7 @@ def run_backtest(cfg, start_year=None, end_year=None):
         raise RuntimeError("新浪与腾讯K线源均不可用，中止回测（快速失败，"
                            "不空转重试）")
 
-    cached_codes = _cached_codes_today()
+    cached_codes = cached_codes_today()
     todo = [c for c in codes if c not in cached_codes]
     breaker = _CircuitBreaker()
     results = []
@@ -413,11 +414,11 @@ def run_backtest(cfg, start_year=None, end_year=None):
         """线程worker：缓存优先 → 拉K线 → 缓存落盘。"""
         bars = None
         if code in cached_codes:
-            bars = _read_kline_cache(code)
+            bars = read_kline_cache(code)
         if bars is None:
             bars = fetch_one(code, fetch_start, fetch_end)
             if bars is not None:
-                _save_kline_cache(code, bars)
+                save_kline_cache(code, bars)
         return code, bars
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -451,7 +452,7 @@ def run_backtest(cfg, start_year=None, end_year=None):
     # 缓存命中的部分也要扫事件（当日重跑场景）
     for code in codes:
         if code in cached_codes:
-            bars = _read_kline_cache(code)
+            bars = read_kline_cache(code)
             if bars:
                 r_list, exdiv, detected = scan_stock_events(
                     code, bars, start_year, end_year)
