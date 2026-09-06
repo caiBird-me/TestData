@@ -105,10 +105,77 @@ def _seal_of(code, zt_map):
     }
 
 
+# ---------- 龙虎榜席位质量 ----------
+
+# 知名席位表（子串匹配营业部名）。打板圈的公共知识：这些席位现身买方
+# 代表特定风格资金接力，对次日溢价有指示意义。
+VIP_SEATS = {
+    "上海溧阳路": "溧阳路(顶级游资)",
+    "益田路荣超": "荣超中心(知名游资)",
+    "绍兴": "绍兴帮",
+    "宁波桑田路": "桑田路(知名游资)",
+    "宁波解放南路": "解放南路(敢死队)",
+    "杭州上塘路": "上塘路(顶级游资)",
+    "南京太平南路": "太平南路(知名游资)",
+    "机构专用": "机构",
+    "股通专用": "北向通道",
+    "拉萨": "拉萨天团(散户)",
+}
+
+
+def ltb_quality_bonus(ltb):
+    """龙虎榜资金面打分：榜内净买额的方向与力度。
+
+    ltb: fetch_ltb_pool 的条目。净买为正=榜内资金愿意隔日接力；
+    大额净卖=出货榜，次日溢价差。"连续三个交易日内"上榜（异常波动）
+    是监管重点监控信号，减分。
+    """
+    if not ltb:
+        return 0
+    net = ltb.get("net_buy") or 0
+    bonus = 0
+    if net > 1e8:
+        bonus += 6
+    elif net > 0:
+        bonus += 4
+    elif net < -1e8:
+        bonus -= 6
+    elif net < 0:
+        bonus -= 3
+    if "连续三个交易日" in (ltb.get("explanation") or ""):
+        bonus -= 3
+    return bonus
+
+
+def seats_quality(buy_seats):
+    """买方席位质量：知名游资/机构现身加分，拉萨天团（东财散户大本营）
+    主导买方代表纯散户情绪、无资金护盘，减分。
+
+    buy_seats: fetch_ltb_seats 的 buy 列表。
+    返回 (分数, [席位标签])。
+    """
+    labels = []
+    for s in buy_seats or []:
+        for key, label in VIP_SEATS.items():
+            if key in s.get("name", "") and label not in labels:
+                labels.append(label)
+    bonus = 0
+    for lab in labels:
+        if lab == "拉萨天团(散户)":
+            bonus -= 4
+        elif lab == "北向通道":
+            bonus += 2
+        elif lab == "机构":
+            bonus += 3
+        else:
+            bonus += 4  # 知名游资
+    return bonus, labels
+
+
 # ---------- 晚间选股 ----------
 
 def evening_picks(stocks, limit_ups, streak_map, themes, cfg, concept_map=None,
-                  zt_pool=None):
+                  zt_pool=None, ltb_pool=None):
     """晚间复盘选股：从主线题材中选候选池。
 
     A. 连板核心 —— 2板及以上（打分曲线：2-3板最优，5板以上降权）
@@ -117,12 +184,15 @@ def evening_picks(stocks, limit_ups, streak_map, themes, cfg, concept_map=None,
 
     zt_pool: 东财涨停池（封板质量数据）。封板时间/炸板/封单影响打分——
     早封+零炸板的板次日溢价显著高于烂板（尾盘偷袭板）。
+    ltb_pool: 东财龙虎榜日榜 {code: 条目}。榜内净买额影响打分——
+    净买的板有资金隔日接力，出货榜减分。
     返回候选列表（带打分与计划），按 score 降序
     """
     st = cfg["strategy"]
     theme_names = {t["name"] for t in themes}
     rk = cfg.get("_risk")  # 由 main 注入
     zt_map = {s["code"]: s for s in (zt_pool or [])}
+    ltb_map = ltb_pool or {}
     picks = []
 
     def basic_ok(s):
@@ -147,6 +217,7 @@ def evening_picks(stocks, limit_ups, streak_map, themes, cfg, concept_map=None,
         if s["main_inflow"] > 5e7:
             score += 8
         score += seal_quality_bonus(_seal_of(s["code"], zt_map))
+        score += ltb_quality_bonus(ltb_map.get(s["code"]))
         picks.append(_make_pick(s, kind, streak, score,
                                 _theme_of(s, theme_names, concept_map), cfg,
                                 zt_map.get(s["code"])))
@@ -169,6 +240,7 @@ def evening_picks(stocks, limit_ups, streak_map, themes, cfg, concept_map=None,
             score += 8
         elif s["main_inflow"] > 2e7:
             score += 4
+        score += ltb_quality_bonus(ltb_map.get(s["code"]))
         picks.append(_make_pick(s, "强势突破", 1, score,
                                 _theme_of(s, theme_names, concept_map), cfg))
 

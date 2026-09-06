@@ -2,7 +2,7 @@
 """A股短线动量/打板分析系统 入口
 
 用法:
-  py src/main.py evening    # 收盘复盘（15:10后）
+  py src/main.py evening    # 收盘复盘（19:10后，含当日龙虎榜）
   py src/main.py morning    # 开盘确认买入（09:32）
   py src/main.py afternoon  # 尾盘提醒（14:45）：T+1卖出/止损提醒，只推送不改账
   py src/main.py stats      # 虚拟盘统计
@@ -90,6 +90,13 @@ def run_evening(cfg):
         print("[evening] 涨停池接口失败，回退自算口径（无封板质量打分）")
 
     prev = ds.load_prev_limit_ups()
+    # 龙虎榜日榜（净买额/上榜原因）：选股打分用；席位明细只给最终候选拉取
+    ltb_pool = ds.fetch_ltb_pool()
+    if ltb_pool:
+        ds.save_ltb_archive(ltb_pool)
+        print(f"[evening] 龙虎榜: {len(ltb_pool)}只上榜（净买额入打分）")
+    else:
+        print("[evening] 龙虎榜接口失败，跳过席位质量打分")
     streak = ds.calc_streak_codes(limit_ups, prev)
     streak = ds.verify_streaks(limit_ups, streak)
     # 官方连板数是权威口径，直接覆盖自算值（池内覆盖全部当日涨停股）
@@ -110,7 +117,19 @@ def run_evening(cfg):
     print(f"[evening] 主线题材: {[t['name'] for t in themes]}")
 
     picks = strategy.evening_picks(stocks, limit_ups, streak, themes, cfg, concept_map,
-                                   zt_pool)
+                                   zt_pool, ltb_pool)
+
+    # 龙虎榜席位明细（只给最终候选拉取，≤max_candidates只×2请求）：
+    # 席位质量（知名游资/机构/拉萨天团）写入候选，供报告展示与信号归档
+    for p in picks:
+        row = ltb_pool.get(p["code"]) if ltb_pool else None
+        if not row:
+            continue
+        seats = ds.fetch_ltb_seats(p["code"])
+        _, labels = strategy.seats_quality(seats.get("buy"))
+        p["ltb"] = {"net_buy": row["net_buy"],
+                    "explanation": row["explanation"],
+                    "labels": labels, "seats": seats}
 
     # ---------- 4. 登记虚拟信号（连亏熔断时不再登记） ----------
     pause, pause_reason = rules.need_pause(portfolio.signals)
@@ -291,8 +310,8 @@ def run_morning(cfg):
 def run_afternoon(cfg):
     """尾盘提醒（14:45）：收盘前15分钟的最后可操作窗口。
 
-    T+1 尾盘卖出指令若在 15:10 evening（收盘后）才推送，人工物理上无法执行——
-    本任务把卖出/持有判断提前到 14:45 推送。只提醒不改账：记账统一在 15:10
+    T+1 尾盘卖出指令若在 evening（19:10）才推送，人工物理上无法执行——
+    本任务把卖出/持有判断提前到 14:45 推送。只提醒不改账：记账统一在 19:10
     evening 用收盘价结算（与 14:45 现价的口径差异很小）。
     """
     date_str = now_cn().strftime("%Y-%m-%d")

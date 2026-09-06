@@ -47,4 +47,4 @@ notify:
   # 推送渠道: serverchan / console / both
   channel: "both"
 
-schedule_note: "云端GitHub Actions: 北京时间 15:10 收盘复盘 / 09:32 开盘确认买入 / 14:45 尾卖提醒"
+schedule_note: "云端GitHub Actions: 北京时间 19:10 收盘复盘（含龙虎榜） / 09:32 开盘确认买入 / 14:45 尾卖提醒"

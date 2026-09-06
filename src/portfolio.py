@@ -134,12 +134,15 @@ class Portfolio:
 
     def register_signal(self, pick, date_str):
         """登记晚间信号（待次日买入）"""
+        ltb = pick.get("ltb") or {}
         self.signals.append({
             "code": pick["code"], "name": pick["name"], "board": pick["board"],
             "kind": pick["kind"], "streak": pick.get("streak", 1),
             "signal_date": date_str,          # 信号产生日（晚间）
             "price": pick.get("price"),       # 信号日收盘价（计算止损用）
             "stop_loss": pick.get("stop_loss"),
+            "ltb_net_buy": ltb.get("net_buy"),    # 龙虎榜净买额（分层统计用）
+            "ltb_labels": ltb.get("labels") or [],
             "buy_date": None, "buy_price": None,
             "status": "pending",              # pending -> holding -> settled
             "settle_date": None, "settle_price": None,

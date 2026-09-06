@@ -447,10 +447,126 @@ def calc_promotion_rate(today_pool=None):
     return round(promoted / len(yesterday_codes), 3), len(yesterday_codes), promoted
 
 
+# ---------- 龙虎榜（东财datacenter数据中心接口，与push2行情API不同信封） ----------
+
+DC_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+
+
+def _get_dc(params, retries=3, timeout=15):
+    """datacenter接口请求：返回 result 部分，失败返回 None。
+
+    与 _get 的区别：datacenter 信封是 {code, result, success}（无rc/data）。
+    """
+    for i in range(retries):
+        try:
+            r = SESSION.get(DC_URL, params=params, timeout=timeout)
+            r.raise_for_status()
+            js = r.json()
+            if js.get("success") is False:
+                return None
+            return js.get("result")
+        except (requests.RequestException, ValueError):
+            time.sleep(2 * (i + 1))
+    print(f"[datasource] datacenter请求失败: {params.get('reportName')}")
+    return None
+
+
+def _ltb_date(date_str):
+    """龙虎榜日期参数：'YYYY-MM-DD'（默认最近交易日）"""
+    if date_str:
+        return date_str
+    d = get_last_trade_date()
+    return f"{d[:4]}-{d[4:6]}-{d[6:]}" if d else now_cn().strftime("%Y-%m-%d")
+
+
+def fetch_ltb_pool(date_str=None):
+    """东财龙虎榜日榜：当日全部上榜股 + 榜内资金数据。
+
+    返回 {code: {code,name,net_buy,buy_amt,sell_amt,deal_ratio,pct,close,
+    turnover,explanation(上榜原因)}}；失败返回 {}。
+    上榜股约60-100只/日——净买额/席位是打板次日溢价的核心领先指标。
+    """
+    date = _ltb_date(date_str)
+    pool = {}
+    page = 1
+    while page <= 5:  # 100只/页×5页，覆盖单日全部榜单
+        result = _get_dc({
+            "reportName": "RPT_DAILYBILLBOARD_DETAILSNEW", "columns": "ALL",
+            "filter": f"(TRADE_DATE='{date}')",
+            "sortColumns": "BILLBOARD_NET_AMT", "sortTypes": "-1",
+            "pageSize": 100, "pageNumber": page,
+        })
+        rows = (result or {}).get("data") or []
+        for r in rows:
+            code = str(r.get("SECURITY_CODE", "")).zfill(6)
+            pool[code] = {
+                "code": code, "name": r.get("SECURITY_NAME_ABBR") or "",
+                "net_buy": _f(r.get("BILLBOARD_NET_AMT")),    # 榜内净买额（元）
+                "buy_amt": _f(r.get("BILLBOARD_BUY_AMT")),
+                "sell_amt": _f(r.get("BILLBOARD_SELL_AMT")),
+                "deal_ratio": _f(r.get("DEAL_AMOUNT_RATIO")),  # 榜内成交占当日成交%
+                "pct": _f(r.get("CHANGE_RATE")), "close": _f(r.get("CLOSE_PRICE")),
+                "turnover": _f(r.get("TURNOVERRATE")),
+                "explanation": r.get("EXPLANATION") or "",     # 上榜原因
+            }
+        pages = (result or {}).get("pages") or 1
+        if len(rows) < 100 or page >= pages:
+            break
+        page += 1
+    return pool
+
+
+def fetch_ltb_seats(code, date_str=None):
+    """龙虎榜买卖前5席位明细（按股按日）。
+
+    返回 {buy: [{name,buy,sell,net}], sell: [...]}；失败返回 {}。
+    """
+    date = _ltb_date(date_str)
+    out = {}
+    for rpt, side in (("RPT_BILLBOARD_DAILYDETAILSBUY", "buy"),
+                      ("RPT_BILLBOARD_DAILYDETAILSSELL", "sell")):
+        result = _get_dc({
+            "reportName": rpt, "columns": "ALL",
+            "filter": f'(SECURITY_CODE="{code}")(TRADE_DATE=\'{date}\')',
+            "sortColumns": "BUY" if side == "buy" else "SELL",
+            "sortTypes": "-1", "pageSize": 10, "pageNumber": 1,
+        })
+        out[side] = [
+            {"name": r.get("OPERATEDEPT_NAME") or "", "buy": _f(r.get("BUY")),
+             "sell": _f(r.get("SELL")), "net": _f(r.get("NET"))}
+            for r in (result or {}).get("data") or []
+        ]
+    return out if out.get("buy") or out.get("sell") else {}
+
+
+def save_ltb_archive(pool, date_str=None):
+    """龙虎榜归档到 data/history/YYYYMMDD_ltb.json（长期保留，
+    将来回测/分层统计"席位质量溢价"用得上）"""
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    if not date_str:
+        date_str = now_cn().strftime("%Y%m%d")
+    path = HISTORY_DIR / f"{date_str}_ltb.json"
+    path.write_text(json.dumps({"date": date_str, "pool": pool}, ensure_ascii=False),
+                    encoding="utf-8")
+    return path
+
+
+def load_ltb_archive(date_str):
+    """读取某日龙虎榜归档，返回 pool 字典（无归档返回 None）"""
+    path = HISTORY_DIR / f"{date_str}_ltb.json"
+    if not path.exists():
+        return None
+    try:
+        js = json.loads(path.read_text(encoding="utf-8"))
+        return js.get("pool")
+    except ValueError:
+        return None
+
+
 def cleanup_archives(keep_raw_days=10, keep_zt_days=90):
     """归档保留策略：原始数据(*_raw.json)只留最近 keep_raw_days 天（一天上百KB，
-    全量保留会让仓库膨胀；10天足够"口径改了能重算"），涨停池归档留 keep_zt_days 天。
-    其余归档（YYYYMMDD.json 每日涨停/强势股名单）很小，永久保留。
+    全量保留会让仓库膨胀；10天足够"口径改了能重算"），涨停池/龙虎榜归档留
+    keep_zt_days 天。其余归档（YYYYMMDD.json 每日涨停/强势股名单）很小，永久保留。
 
     返回删除的文件数。
     """
@@ -472,7 +588,8 @@ def cleanup_archives(keep_raw_days=10, keep_zt_days=90):
         if f.stem.endswith("_raw") and _days_old(f.name) > keep_raw_days:
             f.unlink()
             removed += 1
-        elif f.stem.endswith("_zt") and _days_old(f.name) > keep_zt_days:
+        elif (f.stem.endswith("_zt") or f.stem.endswith("_ltb")) \
+                and _days_old(f.name) > keep_zt_days:
             f.unlink()
             removed += 1
     return removed

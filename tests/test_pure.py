@@ -612,5 +612,46 @@ class TestLayeredStats(unittest.TestCase):
         self.assertEqual(layered_stats(sigs, {}), "")
 
 
+class TestLtbQuality(unittest.TestCase):
+    """龙虎榜资金面与席位质量打分"""
+
+    def test_ltb_quality_bonus(self):
+        from strategy import ltb_quality_bonus
+        self.assertEqual(ltb_quality_bonus(None), 0)
+        self.assertEqual(ltb_quality_bonus({}), 0)
+        # 净买1.5亿：+6
+        self.assertEqual(ltb_quality_bonus({"net_buy": 1.5e8, "explanation": ""}), 6)
+        # 小额净买：+4
+        self.assertEqual(ltb_quality_bonus({"net_buy": 5e6, "explanation": ""}), 4)
+        # 大额净卖：-6
+        self.assertEqual(ltb_quality_bonus({"net_buy": -2e8, "explanation": ""}), -6)
+        # 异常波动（连续三日上榜）再扣3
+        self.assertEqual(
+            ltb_quality_bonus({"net_buy": 1.5e8,
+                               "explanation": "连续三个交易日内收盘价格涨幅偏离值累计达到20%"}),
+            3)
+
+    def test_seats_quality(self):
+        from strategy import seats_quality
+        bonus, labels = seats_quality([
+            {"name": "华鑫证券上海分公司"},
+            {"name": "机构专用"}, {"name": "银河证券绍兴营业部"},
+        ])
+        self.assertIn("绍兴帮", labels)
+        self.assertIn("机构", labels)
+        self.assertEqual(bonus, 7)  # 游资+4、机构+3
+        # 空席位
+        self.assertEqual(seats_quality([]), (0, []))
+
+    def test_seats_quality_lasa_penalty(self):
+        from strategy import seats_quality
+        bonus, labels = seats_quality([
+            {"name": "东方财富证券拉萨团结路第二证券营业部"},
+            {"name": "东方财富证券拉萨东环路第二证券营业部"},
+        ])
+        self.assertIn("拉萨天团(散户)", labels)
+        self.assertEqual(bonus, -4)
+
+
 if __name__ == "__main__":
     unittest.main()

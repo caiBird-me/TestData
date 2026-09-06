@@ -27,6 +27,23 @@ def fmt_seal(pick):
     return " | ".join(parts)
 
 
+def fmt_ltb(pick):
+    """龙虎榜摘要：净买额 + 席位亮点（未上榜/数据缺失时为空）"""
+    ltb = pick.get("ltb")
+    if not ltb:
+        return ""
+    net = ltb.get("net_buy") or 0
+    direction = "净买" if net >= 0 else "净卖"
+    parts = [f"龙虎榜{direction}**{fmt_amount(abs(net))}**"]
+    labels = ltb.get("labels") or []
+    if labels:
+        parts.append("席位: " + "、".join(labels))
+    explanation = (ltb.get("explanation") or "").strip()
+    if explanation:
+        parts.append(f"上榜原因: {explanation}")
+    return " | ".join(parts)
+
+
 def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settlements=None,
                    sentiment=None, lu_count=0, promotion=None):
     """晚间复盘报告。promotion=(晋级率, 昨日涨停数, 晋级数)"""
@@ -89,6 +106,7 @@ def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settle
                 f"换手{p['turnover']:.1f}% | 主力净流入{fmt_amount(p['main_inflow'])}\n"
                 f"   📌 计划买入: **{low}~{high}元** | 止损: **{p['stop_loss']}元** | 打分{p['score']}"
                 + (f"\n   🔒 {seal}" if seal else "")
+                + (f"\n   🐯 {fmt_ltb(p)}" if fmt_ltb(p) else "")
             )
     lines.append("")
 
