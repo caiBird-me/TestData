@@ -65,14 +65,27 @@ class Portfolio:
         "stamp_duty": 0.0005,
     }
 
-    def __init__(self, capital, costs=None):
-        self.path = DATA_DIR / "portfolio.json"
-        self.signals_path = DATA_DIR / "signals.json"
+    def __init__(self, capital, costs=None, book=None):
+        """book=None 走原打板账本路径（data/portfolio.json，向后兼容）；
+        book="trend"/"rotation"/"smallcap" 等走 data/books/{book}.json 分账本。
+        低频账本不使用 signals 生命周期（那是打板"pending→次日竞价买入→T+1结算"语义），
+        额外状态（pending_trades/rebalance_state/nav_history）直接挂在 data dict 上持久化。"""
+        if book is None:
+            self.path = DATA_DIR / "portfolio.json"
+            self.signals_path = DATA_DIR / "signals.json"
+        else:
+            base = DATA_DIR / "books"
+            self.path = base / f"{book}.json"
+            self.signals_path = base / f"{book}_signals.json"
         d = _load(self.path, None)
         if d is None:
             d = {"cash": capital, "positions": [], "initial_capital": capital}
         # 兼容旧数据文件：无 total_costs 字段时初始化
         d.setdefault("total_costs", 0.0)
+        # 低频账本扩展字段（打板账本闲置无害）
+        d.setdefault("pending_trades", [])       # 晚间登记、次日晚间开盘价补账
+        d.setdefault("rebalance_state", {})      # S2 调仓计数 {last_date, count}
+        d.setdefault("nav_history", [])          # 每日净值 [{date, value}]
         self.data = d
         self.signals = _load(self.signals_path, [])
         self.costs = {**self.DEFAULT_COSTS, **(costs or {})}

@@ -28,11 +28,13 @@ HEADERS = {
 }
 
 # clist 字段: f2最新价 f3涨跌幅 f8换手率 f10量比 f12代码 f14名称 f15最高 f16最低 f17今开
-# f18昨收 f20总市值 f21流通市值 f22涨速 f62主力净流入 f100所属板块 f128领涨股
-CLIST_FIELDS = "f2,f3,f8,f10,f12,f14,f15,f16,f17,f18,f20,f21,f62,f100,f128"
+# f18昨收 f20总市值 f21流通市值 f22涨速 f26上市日期 f62主力净流入 f100所属板块 f128领涨股
+CLIST_FIELDS = "f2,f3,f8,f10,f12,f14,f15,f16,f17,f18,f20,f21,f26,f62,f100,f128"
 
 # 全部A股（沪深京）
 FS_ASHARE = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
+# 沪深A股（剔北交所——小市值策略标的池，北证无回测数据源覆盖）
+FS_ASHARE_EXBJ = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
 # 概念/行业板块
 FS_BOARD = "m:90+t:2,m:90+t:1"
 
@@ -115,6 +117,56 @@ def _check_field_drift(normalized, raw_stocks):
               f"东财可能已修改f62字段口径，请人工核对！")
 
 
+def _fetch_clist_pages(fs, fid, po, max_pages, page_size=100, fields=None):
+    """clist 翻页通用实现：按 fid 排序拉取，返回 normalize 后的快照列表（失败返回 []）"""
+    out = []
+    for pn in range(1, max_pages + 1):
+        data = _get(
+            "https://push2.eastmoney.com/api/qt/clist/get",
+            {
+                "pn": pn, "pz": page_size, "po": po, "np": 1,
+                "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+                "fltt": 2, "invt": 2, "fid": fid, "fs": fs,
+                "fields": fields or CLIST_FIELDS,
+            },
+        )
+        if not data or not data.get("diff"):
+            break
+        out.extend(_normalize_stock(s) for s in data["diff"] if _normalize_stock(s))
+        if len(data["diff"]) < page_size:
+            break
+    return out
+
+
+def fetch_smallest_caps(max_count=30, max_pages=15):
+    """按流通市值升序的快照（小市值策略实盘选股）。
+
+    po=0 升序时长期停牌/退市整理股（f2/f21 为 '-'）排在最前（实测约450只），
+    已被 _normalize_stock 过滤；ST 股密集在市值最底部，多拉 max_count 只
+    给上层过滤函数留挑选余量。
+    """
+    stocks = _fetch_clist_pages(FS_ASHARE_EXBJ, "f21", 0, max_pages)
+    return stocks[:max_count]
+
+
+def fetch_market_caps(max_pages=80):
+    """全市场快照（小市值回测的股本映射）：流通股本 = 流通市值/现价。
+
+    返回 [{code,name,price,mktcap,shares,list_date}]。停牌/退市整理股
+    （无 f2/f21）无法算股本，直接剔除——它们的历史K线即便存在也不该被
+    小市值策略选中（略降幸存者偏差方向的乐观性）。
+    """
+    out = []
+    for s in _fetch_clist_pages(FS_ASHARE_EXBJ, "f3", 1, max_pages):
+        if s["price"] > 0 and s["mktcap"] > 0:
+            out.append({
+                "code": s["code"], "name": s["name"], "price": s["price"],
+                "mktcap": s["mktcap"], "shares": s["mktcap"] / s["price"],
+                "list_date": s.get("list_date"),
+            })
+    return out
+
+
 def fetch_snapshot_by_codes(codes):
     """按代码列表拉取实时快照（早间竞价确认用）"""
     secs = []
@@ -143,10 +195,16 @@ def fetch_snapshot_by_codes(codes):
 
 
 def code_to_secid(code):
-    """600xxx -> 1.600xxx (沪)  00xxxx/30xxxx -> 0.00xxxx (深)  8/4开头 -> 0.xxx (北)"""
+    """600xxx -> 1.600xxx (沪)  00xxxx/30xxxx -> 0.00xxxx (深)  8/4开头 -> 0.xxx (北)
+    ETF: 51/56/58开头(沪) -> 1.xxx  15/16/18开头(深) -> 0.xxx
+    （A股无1开头股票代码，深ETF 15xxxx与股票无歧义）"""
     code = str(code).zfill(6)
     if code[0] == "6":
         return f"1.{code}"
+    if code[0] == "5":
+        return f"1.{code}"
+    if code[0] == "1":
+        return f"0.{code}"
     if code[0] in ("0", "3"):
         return f"0.{code}"
     if code[0] in ("8", "4", "9"):
@@ -173,6 +231,7 @@ def _normalize_stock(s):
             "mktcap": _f(s.get("f21")),     # 流通市值(元)
             "main_inflow": _f(s.get("f62")),  # 主力净流入(元)
             "board": s.get("f100") or "",   # 所属板块
+            "list_date": s.get("f26"),      # 上市日期 YYYYMMDD（int，小市值次新过滤用）
         }
     except (KeyError, TypeError):
         return None

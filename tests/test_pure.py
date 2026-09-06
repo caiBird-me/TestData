@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 os.chdir(Path(__file__).resolve().parent.parent)
 
-from datasource import calc_streak_codes, is_limit_up, limit_up_pct
+from datasource import calc_streak_codes, code_to_secid, is_limit_up, limit_up_pct
 from risk import RiskRules
 from strategy import (STREAK_SCORE, find_main_themes, in_themes,
                       streak_score, turnover_bounds)
@@ -81,6 +81,264 @@ class TestGapFilter(unittest.TestCase):
         """刚好-2%不触发（条件是 < -2%）"""
         ok, _ = make_rules().gap_filter(make_stock("600000", -2, 9.8, 9.9))
         self.assertTrue(ok)
+
+
+class TestEtfSymbol(unittest.TestCase):
+    """ETF代码 → 行情源符号"""
+
+    def test_symbol(self):
+        from etf import etf_symbol
+        self.assertEqual(etf_symbol("510300"), "sh510300")
+        self.assertEqual(etf_symbol("518880"), "sh518880")
+        self.assertEqual(etf_symbol("159915"), "sz159915")
+        with self.assertRaises(ValueError):
+            etf_symbol("600000")
+
+
+def _bar(date, close, open_=None, high=None, low=None):
+    return {"date": date, "open": open_ if open_ is not None else close,
+            "close": close, "high": high if high is not None else close,
+            "low": low if low is not None else close}
+
+
+class TestTrendSignal(unittest.TestCase):
+    """S1趋势跟随：价>MA且MA上行→动量最高者；破MA/MA走平→空仓"""
+
+    def _bars(self, closes, start="2026-08-01"):
+        import datetime as dt
+        d0 = dt.date.fromisoformat(start)
+        return [_bar((d0 + dt.timedelta(days=i)).isoformat(), c)
+                for i, c in enumerate(closes)]
+
+    def test_uptrend_picks_best_momentum(self):
+        from etf import trend_target
+        bars = {
+            # 涨得快的（+2%/日）和涨得慢的（+0.5%/日）都过趋势过滤
+            "510300": self._bars([10 * (1.005 ** i) for i in range(30)]),
+            "518880": self._bars([10 * (1.02 ** i) for i in range(30)]),
+        }
+        target, debug = trend_target(bars, "2026-08-30", ma_window=5,
+                                     ma_confirm=1, mom_window=10)
+        self.assertEqual(target, "518880")
+        self.assertTrue(debug["510300"]["pass_trend"])
+
+    def test_below_ma_flat(self):
+        """价格跌破MA/趋势走平：全部候选失效→空仓"""
+        from etf import trend_target
+        bars = {"510300": self._bars([10 - i * 0.05 for i in range(30)])}  # 阴跌
+        target, _ = trend_target(bars, "2026-08-30", ma_window=5, mom_window=10)
+        self.assertIsNone(target)
+
+    def test_price_above_ma_but_ma_falling(self):
+        """价>MA但MA下行（反弹不到位）：空仓保护"""
+        from etf import trend_target
+        # 先深跌再小反弹，MA(5)仍在下行
+        closes = [10, 9, 8, 7, 6, 5.5, 5.4, 5.6, 5.5, 5.6]
+        bars = {"510300": self._bars(closes)}
+        target, _ = trend_target(bars, closes and "2026-08-10",
+                                 ma_window=5, mom_window=3)
+        self.assertIsNone(target)
+
+    def test_insufficient_history_skipped(self):
+        from etf import trend_target
+        bars = {"510300": self._bars([10, 10.1, 10.2])}  # 历史不足
+        target, debug = trend_target(bars, "2026-08-03", ma_window=5, mom_window=5)
+        self.assertIsNone(target)
+        self.assertEqual(debug, {})
+
+
+class TestRotationTargets(unittest.TestCase):
+    """S2行业轮动：动量前2；全负→空仓"""
+
+    def _bars_of(self, code, closes):
+        import datetime as dt
+        d0 = dt.date(2026, 8, 1)
+        return code, [_bar((d0 + dt.timedelta(days=i)).isoformat(), c)
+                      for i, c in enumerate(closes)]
+
+    def test_top2_by_momentum(self):
+        from etf import rotation_targets
+        bars = dict([
+            self._bars_of("512690", [10 * (1.03 ** i) for i in range(25)]),
+            self._bars_of("512010", [10 * (1.02 ** i) for i in range(25)]),
+            self._bars_of("512000", [10 * (1.01 ** i) for i in range(25)]),
+        ])
+        targets, debug = rotation_targets(bars, "2026-08-25", mom_window=20, top_n=2)
+        self.assertEqual(targets, ["512690", "512010"])
+
+    def test_all_negative_cash(self):
+        from etf import rotation_targets
+        bars = dict([
+            self._bars_of("512690", [10 * (0.98 ** i) for i in range(25)]),
+            self._bars_of("512010", [10 * (0.97 ** i) for i in range(25)]),
+        ])
+        targets, _ = rotation_targets(bars, "2026-08-25", mom_window=20, top_n=2)
+        self.assertEqual(targets, ["__CASH__"])
+
+    def test_insufficient_history_not_ranked(self):
+        from etf import rotation_targets
+        bars = dict([self._bars_of("512690", [10, 10.1])])  # 历史不足
+        targets, _ = rotation_targets(bars, "2026-08-02", mom_window=20)
+        self.assertEqual(targets, ["__CASH__"])
+
+
+class TestMonthFirstTradeDay(unittest.TestCase):
+    """月初判定：相邻交易日月份不同"""
+
+    def test_month_boundary(self):
+        from etf import is_first_trade_day_of_month
+        self.assertTrue(is_first_trade_day_of_month("20260831", "20260901"))
+        self.assertFalse(is_first_trade_day_of_month("20260901", "20260902"))
+        self.assertTrue(is_first_trade_day_of_month("20261231", "20270105"))  # 跨年
+        self.assertTrue(is_first_trade_day_of_month("2026-02-27", "2026-03-02"))
+        self.assertFalse(is_first_trade_day_of_month("2026-02-26", "2026-02-27"))
+
+
+class TestRebalanceDue(unittest.TestCase):
+    def test_due(self):
+        from etf import is_rebalance_due
+        self.assertTrue(is_rebalance_due(20, None, 0))          # 从未调仓
+        self.assertFalse(is_rebalance_due(20, "20260901", 19))
+        self.assertTrue(is_rebalance_due(20, "20260901", 20))
+        self.assertTrue(is_rebalance_due(20, "20260901", 21))
+
+
+class TestAllocateEqual(unittest.TestCase):
+    """等权分配整百取整：一手超槽位×1.5的跳过"""
+
+    def test_normal(self):
+        from etf import allocate_equal
+        # 1000元2槽=500/槽；1元ETF一手100元→5手=500股；4元ETF一手400元→1手
+        shares, skipped = allocate_equal(1000, {"A": 1.0, "B": 4.0}, 2)
+        self.assertEqual(shares, {"A": 500, "B": 100})
+        self.assertEqual(skipped, [])
+
+    def test_skip_expensive_lot(self):
+        """一手金额超槽位1.5倍：跳过防单票失衡"""
+        from etf import allocate_equal
+        shares, skipped = allocate_equal(1000, {"A": 1.0, "B": 8.0}, 2)
+        self.assertEqual(shares, {"A": 500})
+        self.assertEqual(skipped, ["B"])
+
+
+class TestBarOnOrAfter(unittest.TestCase):
+    """停牌顺延≤5自然日，超过放弃"""
+
+    def test_exact_day(self):
+        from etf import bar_on_or_after
+        bars = [_bar("2026-09-01", 1), _bar("2026-09-02", 1)]
+        self.assertEqual(bar_on_or_after(bars, "2026-09-02")["date"], "2026-09-02")
+
+    def test_suspend_delayed(self):
+        from etf import bar_on_or_after
+        bars = [_bar("2026-09-01", 1), _bar("2026-09-04", 1)]  # 停2天
+        self.assertEqual(bar_on_or_after(bars, "2026-09-02")["date"], "2026-09-04")
+
+    def test_long_suspend_none(self):
+        from etf import bar_on_or_after
+        bars = [_bar("2026-09-01", 1), _bar("2026-09-20", 1)]  # 停超5天
+        self.assertIsNone(bar_on_or_after(bars, "2026-09-02"))
+
+    def test_no_later_bar(self):
+        from etf import bar_on_or_after
+        self.assertIsNone(bar_on_or_after([_bar("2026-09-01", 1)], "2026-09-02"))
+
+
+class TestSmallcapFilter(unittest.TestCase):
+    """小市值过滤：ST/北交所/次新/低价/无市值剔除，市值升序取5"""
+
+    def _s(self, code, name, cap, price=5.0, ld=20200101):
+        return {"code": code, "name": name, "price": price, "mktcap": cap,
+                "list_date": ld}
+
+    def test_filters_and_order(self):
+        from smallcap import filter_smallcaps
+        stocks = [
+            self._s("600001", "正常A", 8e8),
+            self._s("600002", "ST退", 5e8),          # ST剔除
+            self._s("600003", "次新股", 6e8, ld=20260801),  # 次新剔除
+            self._s("830001", "北交所", 3e8),         # 北交所剔除
+            self._s("600004", "低价股", 7e8, price=1.5),   # 低价剔除
+            self._s("600005", "正常B", 9e8),
+            self._s("600006", "正常C", 1e9),
+        ]
+        picks = filter_smallcaps(stocks, "2026-09-06", top_n=5)
+        self.assertEqual([p["code"] for p in picks], ["600001", "600005", "600006"])
+
+    def test_top_n(self):
+        from smallcap import filter_smallcaps
+        stocks = [self._s(f"60000{i}", f"股{i}", (i + 1) * 1e8) for i in range(7)]
+        picks = filter_smallcaps(stocks, "2026-09-06", top_n=5)
+        self.assertEqual(len(picks), 5)
+        self.assertEqual(picks[0]["code"], "600000")  # 市值最小
+
+
+class TestHistCapTargets(unittest.TestCase):
+    """回测选股：当前股本×历史价近似市值排名"""
+
+    def test_ranking(self):
+        from smallcap import hist_cap_targets
+        bars = {
+            "600001": [_bar("2026-09-01", 10), _bar("2026-09-02", 10)],
+            "600002": [_bar("2026-09-01", 5), _bar("2026-09-02", 5)],
+            "600003": [_bar("2026-09-01", 20)],  # 09-02停牌
+        }
+        shares = {"600001": 1e8, "600002": 2e8, "600003": 1e8}
+        picks = hist_cap_targets(bars, shares, "2026-09-02", top_n=2)
+        # 市值: 600001=10亿, 600002=10亿(并列), 600003停牌剔除
+        self.assertEqual(len(picks), 2)
+        codes = {p[0] for p in picks}
+        self.assertEqual(codes, {"600001", "600002"})
+
+    def test_missing_shares_excluded(self):
+        from smallcap import hist_cap_targets
+        bars = {"600001": [_bar("2026-09-01", 10)]}
+        picks = hist_cap_targets(bars, {}, "2026-09-01")
+        self.assertEqual(picks, [])
+
+
+class TestPortfolioBooks(unittest.TestCase):
+    """多账本：book参数走 data/books/，默认构造保持原打板路径（向后兼容）"""
+
+    def test_book_paths(self):
+        from portfolio import Portfolio
+        p = Portfolio(1000, book="trend")
+        self.assertEqual(p.path.name, "trend.json")
+        self.assertTrue(str(p.path).endswith("books\\trend.json")
+                        or str(p.path).endswith("books/trend.json"))
+        self.assertEqual(p.signals_path.name, "trend_signals.json")
+
+    def test_default_paths_unchanged(self):
+        from portfolio import Portfolio
+        p = Portfolio(3000)
+        self.assertEqual(p.path.name, "portfolio.json")
+        self.assertEqual(p.signals_path.name, "signals.json")
+
+    def test_lowfreq_extension_fields_defaulted(self):
+        from portfolio import Portfolio
+        p = Portfolio(1000, book="rotation")
+        self.assertEqual(p.data["pending_trades"], [])
+        self.assertEqual(p.data["nav_history"], [])
+        self.assertEqual(p.data["rebalance_state"], {})
+
+
+class TestEtfCodeMapping(unittest.TestCase):
+    """ETF secid映射：5开头沪ETF→1.xxx，1开头深ETF→0.xxx；股票分支回归"""
+
+    def test_sh_etf(self):
+        self.assertEqual(code_to_secid("510300"), "1.510300")
+        self.assertEqual(code_to_secid("518880"), "1.518880")
+        self.assertEqual(code_to_secid("512690"), "1.512690")
+
+    def test_sz_etf(self):
+        self.assertEqual(code_to_secid("159915"), "0.159915")
+        self.assertEqual(code_to_secid("159928"), "0.159928")
+
+    def test_stock_branches_unchanged(self):
+        self.assertEqual(code_to_secid("600000"), "1.600000")
+        self.assertEqual(code_to_secid("000001"), "0.000001")
+        self.assertEqual(code_to_secid("300750"), "0.300750")
+        self.assertEqual(code_to_secid("830001"), "0.830001")
 
 
 class TestLimitUp(unittest.TestCase):
