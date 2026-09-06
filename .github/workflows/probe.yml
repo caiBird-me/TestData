@@ -1,0 +1,98 @@
+name: 数据源探针
+# 一次性诊断工具：从 Actions(Azure IP) 实测回测数据源连通性，用事实选源
+on: workflow_dispatch
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 探测数据源
+        env:
+          PYTHONUNBUFFERED: 1
+        run: |
+          python - <<'EOF'
+          import time, requests
+
+          def probe_em(n=20):
+              """东财 push2his：先单请求，再连发 n 个测失败率"""
+              url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+              params = {"secid": "1.600519", "fields1": "f1",
+                        "fields2": "f51,f52,f53,f54,f55,f56,f59",
+                        "klt": 101, "fqt": 1, "end": "20500101", "lmt": 10}
+              ok = fail = 0
+              t0 = time.time()
+              for i in range(n):
+                  try:
+                      r = requests.get(url, params=params, timeout=(5, 10),
+                                       headers={"User-Agent": "Mozilla/5.0"})
+                      d = r.json().get("data") or {}
+                      if d.get("klines"):
+                          ok += 1
+                      else:
+                          fail += 1
+                  except Exception:
+                      fail += 1
+              dt = time.time() - t0
+              print(f"[EM push2his] {ok}/{n} ok, {dt:.1f}s, avg {dt/n:.2f}s/req")
+
+          def probe_tencent(n=20):
+              """腾讯 raw 日K：连发 n 个"""
+              ok = fail = 0
+              t0 = time.time()
+              for i in range(n):
+                  sym = f"sh60{i:04d}"
+                  try:
+                      r = requests.get(
+                          "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+                          params={"param": f"{sym},day,2025-01-01,2025-03-01,10,"},
+                          timeout=(5, 10))
+                      d = (r.json().get("data") or {}).get(sym) or {}
+                      if d.get("day"):
+                          ok += 1
+                      else:
+                          fail += 1
+                  except Exception:
+                      fail += 1
+              dt = time.time() - t0
+              print(f"[Tencent raw] {ok}/{n} ok, {dt:.1f}s, avg {dt/n:.2f}s/req")
+
+          def probe_baostock(n=5):
+              """baostock：登录+逐股全历史，测单股耗时"""
+              import baostock as bs
+              lg = bs.login()
+              print(f"[baostock] login: {lg.error_code} {lg.error_msg}")
+              codes = ["sh.600000", "sz.000001", "sz.300750", "sh.688981", "sz.002594"]
+              t0 = time.time()
+              total = 0
+              for c in codes[:n]:
+                  rs = bs.query_history_k_data_plus(
+                      c, "date,open,high,low,close,volume,pctChg",
+                      start_date="2019-01-01", end_date="2026-12-31",
+                      frequency="d", adjustflag="3")
+                  rows = []
+                  while rs.next():
+                      rows.append(rs.get_row_data())
+                  total += len(rows)
+              dt = time.time() - t0
+              print(f"[baostock] {n} stocks {total} rows in {dt:.1f}s, "
+                    f"avg {dt/n:.2f}s/stock -> 5900只约 {dt/n*5900/60:.0f} 分钟(单线程)")
+              bs.logout()
+
+          probe_em()
+          probe_tencent()
+          try:
+              probe_baostock()
+          except Exception as e:
+              print(f"[baostock] FAIL: {e!r}")
+          EOF
