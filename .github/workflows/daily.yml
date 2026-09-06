@@ -12,7 +12,7 @@ on:
                               #   推送约09:33到达，人工09:35前下单仍在可操作窗口内
     - cron: '45 6 * * 1-5'   # 北京 14:45 周一~周五。收盘前15分钟的尾卖提醒——
                               #   T+1卖出指令在15:10收盘后推送则人工无法执行
-  workflow_dispatch:          # 支持手动触发（选 morning/evening/afternoon/backtest）
+  workflow_dispatch:          # 支持手动触发（选 morning/evening/afternoon/lowfreq/backtest）
     inputs:
       job:
         description: '运行哪个任务'
@@ -23,8 +23,13 @@ on:
           - evening
           - morning
           - afternoon
+          - lowfreq
           - stats
           - backtest
+      mode:
+        description: '回测类型（仅backtest用：etf/smallcap，留空为打板paband）'
+        required: false
+        default: ''
       start_year:
         description: '回测起始年（仅backtest用，默认2019）'
         required: false
@@ -63,6 +68,13 @@ jobs:
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: python src/main.py evening
+
+      - name: 低频虚拟盘（三账本）
+        # 换战场后的主战场：ETF趋势/行业轮动/小市值三本虚拟账本，
+        # 每晚补账（今日开盘价×滑点）+ 登记明晚信号 + 净值入账
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python src/main.py lowfreq
 
       - name: 提交运行数据
         run: |
@@ -125,6 +137,38 @@ jobs:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: python src/main.py afternoon
 
+  lowfreq:
+    # 手动触发低频虚拟盘（正常由 evening job 每晚自动带跑）
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'lowfreq'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 单元测试
+        run: python -m unittest discover -s tests -v
+
+      - name: 低频虚拟盘
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python src/main.py lowfreq
+
+      - name: 提交运行数据
+        run: |
+          git config user.name "stock-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "data: lowfreq $(date -u +%F)"
+          git pull --rebase origin develop || true
+          git push
+
   stats:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'stats'
     runs-on: ubuntu-latest
@@ -171,6 +215,7 @@ jobs:
           PYTHONUNBUFFERED: 1
         run: |
           ARGS=""
+          [ -n "${{ github.event.inputs.mode }}" ] && ARGS="$ARGS ${{ github.event.inputs.mode }}"
           [ -n "${{ github.event.inputs.start_year }}" ] && ARGS="$ARGS ${{ github.event.inputs.start_year }}"
           [ -n "${{ github.event.inputs.end_year }}" ] && ARGS="$ARGS ${{ github.event.inputs.end_year }}"
           python src/main.py backtest $ARGS
@@ -179,7 +224,7 @@ jobs:
         run: |
           git config user.name "stock-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add data/backtest/report.json
+          git add data/backtest/report*.json
           git diff --cached --quiet || git commit -m "data: backtest $(date -u +%F)"
           # 回测跑40分钟期间远端可能有新提交（如代码热修），先rebase再推，撞车不失败
           git pull --rebase origin develop || true
