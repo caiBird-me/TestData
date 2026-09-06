@@ -268,6 +268,8 @@ def scan_stock_events(code, bars, start_year, end_year):
         if not (start_year <= year <= end_year):
             continue
         n_detected += 1
+        if i + 1 >= len(bars):
+            continue  # 末根K线涨停：无D+1买入价，无法模拟（事件仍计入池）
         streak = 1
         j = i - 1
         while j >= 0 and lu_flags[j]:

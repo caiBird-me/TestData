@@ -468,6 +468,19 @@ class TestBacktest(unittest.TestCase):
         self.assertEqual(results[0]["streak"], 1)  # 首板
         self.assertEqual(results[0]["date"], "2026-09-02")  # 买入日=D+1
 
+    def test_last_bar_limit_up_no_crash(self):
+        """末根K线涨停：无D+1可模拟——计入事件池但不崩（云端实测踩过的坑）"""
+        from backtest import scan_stock_events
+        bars = [
+            {"date": "2026-09-03", "open": 9.0, "close": 9.5, "high": 9.6,
+             "low": 8.9, "pct": 5.5},
+            {"date": "2026-09-04", "open": 9.8, "close": 10.45, "high": 10.45,
+             "low": 9.7, "pct": 10.0},
+        ]
+        results, exdiv, n_detected = scan_stock_events("600000", bars, 2026, 2026)
+        self.assertEqual(n_detected, 1)
+        self.assertEqual(results, [])
+
     def test_streak_counting(self):
         from backtest import scan_stock_events
         # 3连板（开盘价控制gap在-2%~+7%内，模拟才能成交）
