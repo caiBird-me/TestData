@@ -398,11 +398,17 @@ def _exec_pending_orders(book, orders, open_prices, slippage, top_n, date_str):
     """低频账本挂单补账：今晚用今日开盘价×(1±滑点)成交昨晚登记的挂单。
 
     orders: pending_trades 列表（ sells 在前 buys 在后，先卖后买释放资金）。
+    登记日==今天的挂单跳过（明晚才轮到它）——同日重跑不得提前成交。
     缺开盘价的（停牌）保留次日重试，超5个自然日作废（与回测 bar_on_or_after
     ≤5日的口径一致）。返回 (成交日志, 未成交留存)。
     """
     log, rest = [], []
     for o in orders:
+        # 今晚刚登记的挂单（date==今日）明晚才补账——同日重跑不得用今日
+        # 开盘价成交，否则CI重试/手动重跑会提前+双倍成交
+        if o.get("date") >= date_str:
+            rest.append(o)
+            continue
         px = open_prices.get(o["code"])
         try:
             age = (datetime.strptime(date_str, "%Y-%m-%d")
@@ -446,6 +452,42 @@ def _book_nav(book, close_prices, date_str):
     day_ret = (mv / prev[-1]["value"] - 1) * 100 if prev else 0.0
     book.data["nav_history"] = prev + [{"date": date_str, "value": mv}]
     return mv, day_ret
+
+
+def _register_orders(book, sell_codes, buys, slot, date_str):
+    """挂单登记：旧挂单先与新信号对账（矛盾作废），再补缺失（去重防双倍成交）。
+
+    两个坑（停牌场景暴露）：
+    1. 矛盾挂单：昨晚挂了卖单的票今晚复评又成了目标——不对账的话，
+       复牌后旧卖单会把该持有的票卖掉（买单同理反向）。
+    2. 重复登记：目标连续多晚不变时每晚重挂一次买单——复牌当晚全部
+       成交造成双倍仓位。
+    buys: [(code, name)]；slot: 买入预算是否按 1/top_n 槽位（False=满仓）。
+    返回新登记的挂单 [(action, code, name)]。
+    """
+    buy_set = {c for c, _ in buys}
+    pending = [o for o in (book.data.get("pending_trades") or [])
+               if (o["action"] == "sell" and o["code"] in sell_codes)
+               or (o["action"] == "buy" and o["code"] in buy_set)]
+    have = {(o["action"], o["code"]) for o in pending}
+    held = {p["code"] for p in book.data["positions"]}
+    added = []
+    for code in sell_codes:
+        if ("sell", code) not in have:
+            pos = next((p for p in book.data["positions"]
+                        if p["code"] == code), None)
+            name = (pos or {}).get("name") or code
+            pending.append({"action": "sell", "code": code, "name": name,
+                            "date": date_str})
+            added.append(("sell", code, name))
+    for code, name in buys:
+        # 已持仓的不再买（防重复仓位——调用方已排除，此处兜底）
+        if ("buy", code) not in have and code not in held:
+            pending.append({"action": "buy", "code": code, "name": name,
+                            "slot": slot, "date": date_str})
+            added.append(("buy", code, name))
+    book.data["pending_trades"] = pending
+    return added
 
 
 def run_lowfreq(cfg):
@@ -505,7 +547,7 @@ def run_lowfreq(cfg):
 
     report_books = []
 
-    def _open_prices_for(book, codes):
+    def _open_prices_for(codes):
         """挂单代码 → 今日开盘价。ETF走日K；股票走快照（open字段）。"""
         etf_codes = [c for c in codes if c in bars_by_code]
         stock_codes = [c for c in codes if c not in bars_by_code]
@@ -525,33 +567,32 @@ def run_lowfreq(cfg):
         pending = book.data.get("pending_trades") or []
         sells = [o for o in pending if o["action"] == "sell"]
         buys = [o for o in pending if o["action"] == "buy"]
-        opens = _open_prices_for(book, [o["code"] for o in pending])
+        opens = _open_prices_for([o["code"] for o in pending])
         actions, rest = _exec_pending_orders(book, sells + buys, opens,
                                              st.get("slippage", 0.001), 1, date_str)
         book.data["pending_trades"] = rest
 
         target, _ = trend_target(trend_bars, date_str, st.get("ma_window", 20),
                                  st.get("ma_confirm", 1), st.get("mom_window", 20))
-        held = list(book.held_codes())
-        hold_code = held[0] if len(held) == 1 else (None if not held else held[0])
-        signals = []
-        if target != hold_code:
-            if hold_code:
-                book.data["pending_trades"].append({
-                    "action": "sell", "code": hold_code,
-                    "name": etfmod.ETF_NAMES.get(hold_code, hold_code),
-                    "date": date_str})
-                signals.append(f"卖出 {etfmod.ETF_NAMES.get(hold_code, hold_code)}"
-                               f"（跌破均线/均线下行）")
-            if target:
-                book.data["pending_trades"].append({
-                    "action": "buy", "code": target, "slot": False,
-                    "name": etfmod.ETF_NAMES.get(target, target), "date": date_str})
-                signals.append(f"买入 {etfmod.ETF_NAMES.get(target, target)}"
-                               f"（池内动量最高且站上均线）")
-        if not signals:
-            signals = [f"继续持有 {etfmod.ETF_NAMES.get(hold_code, hold_code)}"] if hold_code \
-                else ["空仓观望（无标的站上均线）"]
+        held = set(book.held_codes())
+        sell_codes = {c for c in held if c != target}
+        buys = ([(target, etfmod.ETF_NAMES.get(target, target))]
+               if target and target not in held else [])
+        added = _register_orders(book, sell_codes, buys, False, date_str)
+        if added:
+            signals = [f"{'卖出' if a == 'sell' else '买入'} {n}"
+                       f"（{'趋势破坏' if a == 'sell' else '池内动量最高且站上均线'}）"
+                       for a, _, n in added]
+        elif held:
+            names = "、".join(etfmod.ETF_NAMES.get(c, c) for c in held)
+            signals = [f"继续持有 {names}"]
+        elif book.data["pending_trades"]:
+            # 目标未变、挂单去重未新增：别误报"空仓"（明晚开盘才成交）
+            names = "、".join(o["name"] for o in book.data["pending_trades"]
+                             if o["action"] == "buy")
+            signals = [f"空仓（已挂买单待成交：{names}）"]
+        else:
+            signals = ["空仓观望（无标的站上均线）"]
 
         closes = {c: etf_px(c, "close") for c in book.held_codes()}
         nav, day_ret = _book_nav(book, {c: p for c, p in closes.items() if p}, date_str)
@@ -567,7 +608,7 @@ def run_lowfreq(cfg):
         pending = book.data.get("pending_trades") or []
         sells = [o for o in pending if o["action"] == "sell"]
         buys = [o for o in pending if o["action"] == "buy"]
-        opens = _open_prices_for(book, [o["code"] for o in pending])
+        opens = _open_prices_for([o["code"] for o in pending])
         top_n = sr.get("top_n", 2)
         actions, rest = _exec_pending_orders(book, sells + buys, opens,
                                              sr.get("slippage", 0.001), top_n, date_str)
@@ -581,18 +622,13 @@ def run_lowfreq(cfg):
             targets, _ = rotation_targets(rot_bars, date_str, sr.get("mom_window", 20),
                                            top_n, sr.get("min_mom", 0.0))
             tgt = set(targets) - {"__CASH__"}
-            for code in list(book.held_codes()):
-                if code not in tgt:
-                    book.data["pending_trades"].append({
-                        "action": "sell", "code": code,
-                        "name": etfmod.ETF_NAMES.get(code, code), "date": date_str})
-                    signals.append(f"调出 {etfmod.ETF_NAMES.get(code, code)}")
-            for code in targets:
-                if code != "__CASH__" and code not in book.held_codes():
-                    book.data["pending_trades"].append({
-                        "action": "buy", "code": code, "slot": True,
-                        "name": etfmod.ETF_NAMES.get(code, code), "date": date_str})
-                    signals.append(f"调入 {etfmod.ETF_NAMES.get(code, code)}")
+            held = set(book.held_codes())
+            sell_codes = {c for c in held if c not in tgt}
+            buys = [(c, etfmod.ETF_NAMES.get(c, c)) for c in targets
+                    if c != "__CASH__" and c not in held]
+            added = _register_orders(book, sell_codes, buys, True, date_str)
+            signals = [f"{'调出' if a == 'sell' else '调入'} {n}"
+                       for a, _, n in added]
             if not tgt:
                 signals.append("全池动量≤0，空仓持币")
             reb.update({"last_date": date_str, "count": 0})
@@ -614,7 +650,7 @@ def run_lowfreq(cfg):
         pending = book.data.get("pending_trades") or []
         sells = [o for o in pending if o["action"] == "sell"]
         buys = [o for o in pending if o["action"] == "buy"]
-        opens = _open_prices_for(book, [o["code"] for o in pending])
+        opens = _open_prices_for([o["code"] for o in pending])
         top_n = ss.get("top_n", 5)
         actions, rest = _exec_pending_orders(book, sells + buys, opens,
                                              ss.get("slippage", 0.003), top_n, date_str)
@@ -622,25 +658,20 @@ def run_lowfreq(cfg):
 
         signals = []
         if prev_trade and is_first_trade_day_of_month(prev_trade, date_str):
-            stocks = ds.fetch_smallest_caps(max_count=30)
+            # 升序前60只里ST/次新密集（实测前30仅剩5只合格，贴线），
+            # 多拉一倍给过滤函数留余量
+            stocks = ds.fetch_smallest_caps(max_count=60)
             picks = scmod.filter_smallcaps(stocks, date_str,
                                            ss.get("min_list_days", 365),
                                            ss.get("min_price", 2.0), top_n)
+            held = set(book.held_codes())
             picks_codes = {s["code"] for s in picks}
-            for code in list(book.held_codes()):
-                if code not in picks_codes:
-                    pos = next(p for p in book.data["positions"] if p["code"] == code)
-                    book.data["pending_trades"].append({
-                        "action": "sell", "code": code, "name": pos["name"],
-                        "date": date_str})
-                    signals.append(f"调出 {pos['name']}({code})")
-            for s in picks:
-                if s["code"] not in book.held_codes():
-                    book.data["pending_trades"].append({
-                        "action": "buy", "code": s["code"], "name": s["name"],
-                        "slot": True, "date": date_str})
-                    signals.append(f"调入 {s['name']}({s['code']}) "
-                                   f"市值{s['mktcap'] / 1e8:.1f}亿")
+            sell_codes = {c for c in held if c not in picks_codes}
+            buys = [(s["code"], f"{s['name']}（市值{s['mktcap'] / 1e8:.1f}亿）")
+                    for s in picks if s["code"] not in held]
+            added = _register_orders(book, sell_codes, buys, True, date_str)
+            signals = [f"{'调出' if a == 'sell' else '调入'} {n}"
+                       for a, _, n in added]
         else:
             signals = ["月度策略：非月初交易日，持仓不动"]
 

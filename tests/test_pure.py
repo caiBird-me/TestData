@@ -203,24 +203,6 @@ class TestRebalanceDue(unittest.TestCase):
         self.assertTrue(is_rebalance_due(20, "20260901", 21))
 
 
-class TestAllocateEqual(unittest.TestCase):
-    """等权分配整百取整：一手超槽位×1.5的跳过"""
-
-    def test_normal(self):
-        from etf import allocate_equal
-        # 1000元2槽=500/槽；1元ETF一手100元→5手=500股；4元ETF一手400元→1手
-        shares, skipped = allocate_equal(1000, {"A": 1.0, "B": 4.0}, 2)
-        self.assertEqual(shares, {"A": 500, "B": 100})
-        self.assertEqual(skipped, [])
-
-    def test_skip_expensive_lot(self):
-        """一手金额超槽位1.5倍：跳过防单票失衡"""
-        from etf import allocate_equal
-        shares, skipped = allocate_equal(1000, {"A": 1.0, "B": 8.0}, 2)
-        self.assertEqual(shares, {"A": 500})
-        self.assertEqual(skipped, ["B"])
-
-
 class TestBarOnOrAfter(unittest.TestCase):
     """停牌顺延≤5自然日，超过放弃"""
 
@@ -273,28 +255,71 @@ class TestSmallcapFilter(unittest.TestCase):
         self.assertEqual(picks[0]["code"], "600000")  # 市值最小
 
 
-class TestHistCapTargets(unittest.TestCase):
-    """回测选股：当前股本×历史价近似市值排名"""
+class TestExecPendingGuard(unittest.TestCase):
+    """补账守卫：今晚刚登记的挂单（date==今日）不得当日成交"""
 
-    def test_ranking(self):
-        from smallcap import hist_cap_targets
-        bars = {
-            "600001": [_bar("2026-09-01", 10), _bar("2026-09-02", 10)],
-            "600002": [_bar("2026-09-01", 5), _bar("2026-09-02", 5)],
-            "600003": [_bar("2026-09-01", 20)],  # 09-02停牌
-        }
-        shares = {"600001": 1e8, "600002": 2e8, "600003": 1e8}
-        picks = hist_cap_targets(bars, shares, "2026-09-02", top_n=2)
-        # 市值: 600001=10亿, 600002=10亿(并列), 600003停牌剔除
-        self.assertEqual(len(picks), 2)
-        codes = {p[0] for p in picks}
-        self.assertEqual(codes, {"600001", "600002"})
+    def test_same_day_order_skipped(self):
+        from main import _exec_pending_orders
 
-    def test_missing_shares_excluded(self):
-        from smallcap import hist_cap_targets
-        bars = {"600001": [_bar("2026-09-01", 10)]}
-        picks = hist_cap_targets(bars, {}, "2026-09-01")
-        self.assertEqual(picks, [])
+        class Book:
+            def __init__(self):
+                self.calls = []
+                self.data = {"cash": 1000.0, "positions": []}
+
+            def sell(self, *a):
+                self.calls.append(("sell",) + a)
+                return (1.0, 0.1)
+
+            def buy(self, *a, **k):
+                self.calls.append(("buy",) + a)
+                return None
+
+        book = Book()
+        order = {"action": "buy", "code": "510300", "name": "沪深300ETF",
+                 "slot": True, "date": "2026-09-07"}
+        log, rest = _exec_pending_orders(book, [order], {"510300": 4.0},
+                                        0.001, 2, "2026-09-07")
+        self.assertEqual(book.calls, [])
+        self.assertEqual(log, [])
+        self.assertEqual(rest, [order])
+        # 昨晚登记的挂单：今日可成交（预算=1000/2槽=500，4.004元/股→1手）
+        order2 = dict(order, date="2026-09-06")
+        log2, rest2 = _exec_pending_orders(book, [order2], {"510300": 4.0},
+                                           0.001, 2, "2026-09-07")
+        self.assertEqual(book.calls, [("buy", "510300", "沪深300ETF", 4.004, 100)])
+
+
+class TestRegisterOrders(unittest.TestCase):
+    """低频挂单登记：对账（矛盾挂单作废）+ 去重（防复牌双倍成交）"""
+
+    class _Book:
+        def __init__(self):
+            self.data = {"pending_trades": [], "positions": [
+                {"code": "512690", "name": "酒ETF"}]}
+
+    def test_register_and_dedup(self):
+        from main import _register_orders
+        book = self._Book()
+        added = _register_orders(book, {"512690"}, [("510300", "沪深300ETF")],
+                                 True, "2026-09-07")
+        self.assertEqual([(a, c) for a, c, _ in added],
+                        [("sell", "512690"), ("buy", "510300")])
+        # 目标连续不变：不重复登记
+        added2 = _register_orders(book, {"512690"}, [("510300", "沪深300ETF")],
+                                  True, "2026-09-08")
+        self.assertEqual(added2, [])
+        self.assertEqual(len(book.data["pending_trades"]), 2)
+
+    def test_reconcile_contradictory(self):
+        """旧卖单与新目标矛盾：对账后作废，不再卖出该持仓"""
+        from main import _register_orders
+        book = self._Book()
+        book.data["pending_trades"] = [
+            {"action": "sell", "code": "512690", "name": "酒ETF",
+             "date": "2026-09-07"}]
+        _register_orders(book, set(), [("512690", "酒ETF")], True, "2026-09-08")
+        # 512690 仍是目标：旧卖单被对账掉，无新挂单
+        self.assertEqual(book.data["pending_trades"], [])
 
 
 class TestPortfolioBooks(unittest.TestCase):

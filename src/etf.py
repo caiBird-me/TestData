@@ -70,29 +70,6 @@ def is_rebalance_due(rebalance_days, last_rebalance_date, count):
     return count >= rebalance_days
 
 
-def allocate_equal(cash, prices, n_slots, max_lot_premium=1.5):
-    """等权分配 + 整百取整（A股ETF一手100份）。
-
-    每槽 = cash/n_slots；一手金额 > 槽位×max_lot_premium 的标的跳过
-    （防止单票仓位失衡——2元股一手200元贴线可买，10元股一手1000元直接超槽）。
-    返回 ({code: shares}, [被跳过的code])。剩余零头现金留在账上。
-    """
-    slot = cash / n_slots if n_slots > 0 else 0
-    result, skipped = {}, []
-    for code, price in prices.items():
-        if price <= 0:
-            skipped.append(code)
-            continue
-        one_lot = price * 100
-        if one_lot > slot * max_lot_premium:
-            skipped.append(code)
-            continue
-        shares = int(slot // one_lot) * 100
-        if shares >= 100:
-            result[code] = shares
-    return result, skipped
-
-
 def bar_on_or_after(bars, date, max_delay=5):
     """停牌处理：bars 中日期 >= date 的第一根K线（顺延成交），顺延超过
     max_delay 个自然日视为长期停牌，返回 None（放弃，现金保留到下期）。
