@@ -316,3 +316,38 @@ _signals = []  # 由 main 注入，供 stats_report 使用
 def set_signals(signals):
     global _signals
     _signals = signals
+
+
+def lowfreq_daily_report(date_str, report_books):
+    """低频三策略虚拟账本日报。
+
+    report_books: [(key, label, book, nav, day_ret, actions, signals)]，
+    book 为 Portfolio 实例（取持仓/现金/成本），actions=今晚补账成交日志，
+    signals=今晚新登记的信号（明晚开盘成交）。
+    """
+    lines = [f"## 📊 低频虚拟盘 {date_str}", "",
+             "三本各1000元虚拟账本（回测+4周虚拟验证后按表现集中3k实盘）。"
+             "信号今晚登记、明晚按今日开盘价×滑点补账。", ""]
+    for key, label, book, nav, day_ret, actions, signals in report_books:
+        d = book.data
+        capital = d.get("initial_capital", 1000)
+        total_ret = (nav / capital - 1) * 100
+        lines.append(f"**{label}**")
+        lines.append(f"- 净值 **{nav:.2f}元**（本金{capital:.0f}元，"
+                     f"累计{total_ret:+.1f}%，今日{day_ret:+.2f}%）")
+        pos = d.get("positions") or []
+        if pos:
+            held = "、".join(f"{p['name']}({p['shares']}股)"
+                             for p in pos)
+            lines.append(f"- 持仓: {held}")
+        else:
+            lines.append("- 持仓: 空仓（现金）")
+        lines.append(f"- 现金 {d.get('cash', 0):.2f}元 | "
+                     f"累计成本 {d.get('total_costs', 0):.2f}元")
+        if actions:
+            lines.append("- 今日成交: " + "；".join(actions))
+        if signals:
+            lines.append("- 今晚信号: " + "；".join(signals))
+        lines.append("")
+    lines.append("_虚拟盘验证阶段，不构成投资建议_")
+    return "\n".join(lines)

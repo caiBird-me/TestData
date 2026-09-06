@@ -39,6 +39,45 @@ backtest:
   workers: 6                # K线并发拉取线程数（新浪主源；腾讯备源时建议调低防WAF）
   max_events_per_day: 2     # 每日模拟事件上限（对应实盘 max_stocks）
 
+# ---------- 低频三策略（换战场：ETF趋势/行业轮动/小市值轮动） ----------
+# 打板八年回测全负后转向的低频战场：不抢速度、摩擦占比低、机器不与散户抢。
+# 三个策略各一本虚拟账本（books），回测+4周虚拟验证后按表现集中资金。
+books:                       # 三本虚拟账本（py src/main.py lowfreq 每晚维护）
+  trend:    {capital: 1000, costs: etf_free}    # S1：免五口径（回测双场景的基准列）
+  rotation: {capital: 1000, costs: etf_free}
+  smallcap: {capital: 1000, costs: stock_std}   # S3：股票成本（含印花税）
+lowfreq:
+  trend:                       # S1 指数ETF趋势跟随（宽基/黄金分散趋势来源）
+    universe: [510300, 510500, 159915, 512100, 510880, 518880]
+    ma_window: 20             # 趋势均线（回测网格对比 20/60）
+    ma_confirm: 1              # MA需上行的确认天数
+    mom_window: 20             # 动量窗口（回测网格对比 20/60/120）
+    slippage: 0.001            # ±0.1%滑点（ETF点差）
+  rotation:                    # S2 行业ETF轮动
+    universe: [512690, 512010, 512480, 512660, 512000, 512800, 515030, 515790,
+               512400, 515220, 159928, 159825, 515000, 515880, 512720, 512200,
+               512170, 516010, 512760, 515210, 512580, 159611]
+    rebalance_days: 20         # 调仓间隔（回测对比 5周频/20/60月频）
+    mom_window: 20             # 动量排名窗口
+    top_n: 2                    # 持有前2名
+    min_mom: 0.0               # 最强者动量也<0时空仓持币
+    slippage: 0.001
+  smallcap:                    # S3 小市值轮动（回测偏差最重，只作方向参考）
+    top_n: 5
+    min_list_days: 365         # 剔除次新
+    min_price: 2.0
+    slippage: 0.003            # 小票滑点与打板同口径
+  costs:                       # 回测双成本场景：免五与否对3k月频轮动是分水岭
+    etf_std:  {commission_rate: 0.00025, commission_min: 5.0, stamp_duty: 0}   # 普通券商
+    etf_free: {commission_rate: 0.0005,  commission_min: 0.0, stamp_duty: 0}   # ETF免五
+    stock_std: {commission_rate: 0.00025, commission_min: 5.0, stamp_duty: 0.0005}
+
+# ---------- 打板降级：纯虚拟盘（对照组） ----------
+# 八年回测全负后停止打板实盘跟进：morning/afternoon 不再推送可执行指令，
+# 晚间复盘保留（情绪温度计：晋级率/涨停均涨幅 + 虚拟盘对照组数据）。
+paband:
+  virtual_only: true
+
 notify:
   # ⚠️ 出于安全考虑，SendKey 不写入本文件（会随git推送到云端造成泄露）。
   # 本地使用：先执行  set SERVERCHAN_KEY=你的SendKey  再运行程序；
@@ -47,4 +86,4 @@ notify:
   # 推送渠道: serverchan / console / both
   channel: "both"
 
-schedule_note: "云端GitHub Actions: 北京时间 19:10 收盘复盘（含龙虎榜） / 09:32 开盘确认买入 / 14:45 尾卖提醒"
+schedule_note: "云端GitHub Actions: 北京时间 19:10 收盘复盘（含龙虎榜）+ 低频三账本 / 09:32 开盘确认 / 14:45 尾卖提醒（virtual_only时跳过）"

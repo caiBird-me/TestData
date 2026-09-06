@@ -5,8 +5,9 @@
   py src/main.py evening    # 收盘复盘（19:10后，含当日龙虎榜）
   py src/main.py morning    # 开盘确认买入（09:32）
   py src/main.py afternoon  # 尾盘提醒（14:45）：T+1卖出/止损提醒，只推送不改账
+  py src/main.py lowfreq    # 低频三策略虚拟账本（每晚收盘后，evening之后）
   py src/main.py stats      # 虚拟盘统计
-  py src/main.py backtest [起始年 结束年]  # 历史事件回测（建议云端跑）
+  py src/main.py backtest [etf|smallcap] [起始年 结束年]  # 历史回测
 """
 import json
 import os
@@ -153,7 +154,10 @@ def run_evening(cfg):
     md = report.evening_report(date_str, themes, limit_ups, picks, rules,
                                 pause_reason if pause else None, settlements,
                                 sentiment, lu_count, promotion)
-    notify.send(cfg, f"收盘复盘 {date_str}", md)
+    # 打板降级后晚间复盘保留推送：情绪温度计（晋级率/涨停均涨幅）与虚拟对照组数据
+    title = f"🧪虚拟对照组|收盘复盘 {date_str}" if _paband_virtual_only(cfg) \
+        else f"收盘复盘 {date_str}"
+    notify.send(cfg, title, md)
     return 0
 
 
@@ -211,8 +215,11 @@ def run_morning(cfg):
         portfolio.save()
 
     if not pending:
-        notify.send(cfg, f"竞价确认 {date_str}",
-                    f"## ⚔️ 今日作战计划 {date_str}\n\n昨晚无候选信号（或已过期），今日观望。")
+        if _paband_virtual_only(cfg):
+            print("[morning] 打板已降级纯虚拟盘（virtual_only），无候选信号，观望")
+        else:
+            notify.send(cfg, f"竞价确认 {date_str}",
+                        f"## ⚔️ 今日作战计划 {date_str}\n\n昨晚无候选信号（或已过期），今日观望。")
         return 0
 
     print(f"[morning] 待确认信号 {len(pending)} 个，拉取实时行情 ...")
@@ -303,8 +310,28 @@ def run_morning(cfg):
     md = report.morning_report(date_str, plan, rejected, rules,
                                pause_reason if pause else None, sentiment, sentiment_bad,
                                position_actions, promo_rate, promo_bad)
-    notify.send(cfg, f"竞价确认 {date_str}", md)
+    # 打板降级纯虚拟盘：作战计划是可执行指令，只打日志不推送微信
+    # （虚拟买入照常记账——对照组数据继续积累，情绪指标由 evening 推送）
+    if _paband_virtual_only(cfg):
+        print("[morning] 打板已降级纯虚拟盘（virtual_only），作战计划只打日志不推送")
+        _console_log(md)
+    else:
+        notify.send(cfg, f"竞价确认 {date_str}", md)
     return 0
+
+
+def _paband_virtual_only(cfg):
+    """打板是否已降级纯虚拟盘（八年回测全负后停止实盘跟进）。"""
+    return bool((cfg.get("paband") or {}).get("virtual_only"))
+
+
+def _console_log(md):
+    """控制台输出markdown（GBK终端遇到emoji不崩，可替换字符）"""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
+    print(md)
 
 
 def run_afternoon(cfg):
@@ -315,6 +342,11 @@ def run_afternoon(cfg):
     evening 用收盘价结算（与 14:45 现价的口径差异很小）。
     """
     date_str = now_cn().strftime("%Y-%m-%d")
+
+    # 打板降级纯虚拟盘：尾卖提醒的唯一作用是人工执行提醒，无实盘持仓即无用
+    if _paband_virtual_only(cfg):
+        print("[afternoon] 打板已降级纯虚拟盘（virtual_only），尾盘提醒跳过")
+        return 0
 
     if not ds.is_today_trading_day():
         print("[afternoon] 今日非交易日（行情时间戳未更新），跳过")
@@ -362,12 +394,282 @@ def run_afternoon(cfg):
     return 0
 
 
-def run_backtest(cfg, start_year=None, end_year=None):
-    """历史事件回测：全市场日K自建涨停日历 → 模拟策略 → 统计报告。
+def _exec_pending_orders(book, orders, open_prices, slippage, top_n, date_str):
+    """低频账本挂单补账：今晚用今日开盘价×(1±滑点)成交昨晚登记的挂单。
 
-    数据源：baostock（主，多进程并行）→ 腾讯（备）。全市场规模本地约1小时、
-    云端约2小时；K线有当日磁盘缓存，中断重跑只补未完成的部分。
+    orders: pending_trades 列表（ sells 在前 buys 在后，先卖后买释放资金）。
+    缺开盘价的（停牌）保留次日重试，超5个自然日作废（与回测 bar_on_or_after
+    ≤5日的口径一致）。返回 (成交日志, 未成交留存)。
     """
+    log, rest = [], []
+    for o in orders:
+        px = open_prices.get(o["code"])
+        try:
+            age = (datetime.strptime(date_str, "%Y-%m-%d")
+                   - datetime.strptime(o["date"], "%Y-%m-%d")).days
+        except ValueError:
+            age = 99
+        if not px or px <= 0:
+            if age <= 5:
+                rest.append(o)
+            else:
+                log.append(f"⏸️ {o['name']}({o['code']}) 停牌超5日，挂单作废")
+            continue
+        if o["action"] == "sell":
+            ret = book.sell(o["code"], round(px * (1 - slippage), 4), "低频调仓")
+            if ret:
+                log.append(f"卖出 {o['name']}({o['code']}) @{px * (1 - slippage):.3f}"
+                           f"（{ret[1]:+.1f}%）")
+            else:
+                log.append(f"⚠️ {o['code']} 无持仓可卖，挂单作废")
+        else:
+            fill = px * (1 + slippage)
+            # 买入预算：账面总值/槽位（slot=True）或全部现金（趋势单票满仓）。
+            # 总值含刚卖出的资金（先卖后买由列表顺序保证）
+            value = book.data["cash"] + sum(p["amount"] for p in book.data["positions"])
+            budget = value / top_n if o.get("slot") else value
+            shares = int(budget // (fill * 100)) * 100
+            pos = book.buy(o["code"], o["name"], round(fill, 4), shares,
+                           date_str=date_str) if shares >= 100 else None
+            if pos:
+                log.append(f"买入 {o['name']}({o['code']}) {pos['shares']}股 @{fill:.3f}")
+            else:
+                log.append(f"⚠️ {o['name']}({o['code']}) 一手超预算，未买入")
+    return log, rest
+
+
+def _book_nav(book, close_prices, date_str):
+    """净值入账：nav_history 追加当日值（重跑覆盖，不重复）。返回 (净值, 今日变动%)"""
+    mv = book.market_value(close_prices)
+    nh = book.data["nav_history"]
+    prev = [x for x in nh if x["date"] != date_str]
+    day_ret = (mv / prev[-1]["value"] - 1) * 100 if prev else 0.0
+    book.data["nav_history"] = prev + [{"date": date_str, "value": mv}]
+    return mv, day_ret
+
+
+def run_lowfreq(cfg):
+    """低频三策略虚拟账本（每晚收盘后运行，在 evening 之后）：
+
+    补账昨晚挂单（今日开盘价×滑点）→ 计算今晚信号 → 登记新挂单
+    （明晚补账执行）→ 记净值 → 推送。三个账本各1000元虚拟资金，
+    4周后与回测对照决定3k实盘向哪个策略集中。
+    """
+    import etf as etfmod
+    import smallcap as scmod
+    from backtest_lowfreq import load_etf_bars
+    from etf import (trend_target, rotation_targets,
+                     is_first_trade_day_of_month, is_rebalance_due)
+
+    date_str = now_cn().strftime("%Y-%m-%d")
+    if os.environ.get("STOCK_FORCE") != "1":
+        today_cn = now_cn().strftime("%Y%m%d")
+        if ds.get_last_trade_date() != today_cn:
+            print("[lowfreq] 今日非交易日，跳过")
+            return 0
+
+    lf = cfg.get("lowfreq") or {}
+    books_cfg = cfg.get("books") or {}
+    if not books_cfg:
+        print("[lowfreq] config.yaml 缺 books 段（三本虚拟账本），跳过")
+        return 0
+    costs_all = lf.get("costs") or {}
+
+    def _codes(lst):
+        return [str(c).zfill(6) for c in (lst or [])]
+
+    st = lf.get("trend") or {}
+    sr = lf.get("rotation") or {}
+    ss = lf.get("smallcap") or {}
+    trend_u = _codes(st.get("universe")) or etfmod.TREND_UNIVERSE
+    rot_u = _codes(sr.get("universe")) or etfmod.ROTATION_UNIVERSE
+
+    # 一次性拉齐两本ETF账本的日K（腾讯qfq含今日K线；500自然日够MA60/mom120预热）
+    universe = sorted(set(trend_u) | set(rot_u))
+    print(f"[lowfreq] 拉取 {len(universe)} 只ETF日K ...", flush=True)
+    bars_by_code = load_etf_bars(
+        universe, (now_cn() - timedelta(days=500)).strftime("%Y-%m-%d"), date_str)
+    trend_bars = {c: bars_by_code[c] for c in trend_u if c in bars_by_code}
+    rot_bars = {c: bars_by_code[c] for c in rot_u if c in bars_by_code}
+
+    # 交易日历（S3 月初判定用最近两个交易日）+ ETF当日开盘/收盘
+    cal = sorted({b["date"][:10] for bars in bars_by_code.values()
+                  for b in bars if b["date"][:10] <= date_str})
+    prev_trade = cal[-2] if len(cal) >= 2 else None
+
+    def etf_px(code, field):
+        bars = bars_by_code.get(code) or []
+        if bars and bars[-1]["date"][:10] == date_str:
+            return bars[-1][field]
+        return None
+
+    report_books = []
+
+    def _open_prices_for(book, codes):
+        """挂单代码 → 今日开盘价。ETF走日K；股票走快照（open字段）。"""
+        etf_codes = [c for c in codes if c in bars_by_code]
+        stock_codes = [c for c in codes if c not in bars_by_code]
+        out = {c: etf_px(c, "open") for c in etf_codes}
+        if stock_codes:
+            snap = ds.fetch_snapshot_by_codes(stock_codes)
+            for c, s in snap.items():
+                if s.get("open", 0) > 0:
+                    out[c] = s["open"]
+        return out
+
+    # ---------- S1 趋势跟随 ----------
+    if "trend" in books_cfg:
+        bc = books_cfg["trend"]
+        book = pf.Portfolio(bc.get("capital", 1000), costs_all.get(bc.get("costs")),
+                            book="trend")
+        pending = book.data.get("pending_trades") or []
+        sells = [o for o in pending if o["action"] == "sell"]
+        buys = [o for o in pending if o["action"] == "buy"]
+        opens = _open_prices_for(book, [o["code"] for o in pending])
+        actions, rest = _exec_pending_orders(book, sells + buys, opens,
+                                             st.get("slippage", 0.001), 1, date_str)
+        book.data["pending_trades"] = rest
+
+        target, _ = trend_target(trend_bars, date_str, st.get("ma_window", 20),
+                                 st.get("ma_confirm", 1), st.get("mom_window", 20))
+        held = list(book.held_codes())
+        hold_code = held[0] if len(held) == 1 else (None if not held else held[0])
+        signals = []
+        if target != hold_code:
+            if hold_code:
+                book.data["pending_trades"].append({
+                    "action": "sell", "code": hold_code,
+                    "name": etfmod.ETF_NAMES.get(hold_code, hold_code),
+                    "date": date_str})
+                signals.append(f"卖出 {etfmod.ETF_NAMES.get(hold_code, hold_code)}"
+                               f"（跌破均线/均线下行）")
+            if target:
+                book.data["pending_trades"].append({
+                    "action": "buy", "code": target, "slot": False,
+                    "name": etfmod.ETF_NAMES.get(target, target), "date": date_str})
+                signals.append(f"买入 {etfmod.ETF_NAMES.get(target, target)}"
+                               f"（池内动量最高且站上均线）")
+        if not signals:
+            signals = [f"继续持有 {etfmod.ETF_NAMES.get(hold_code, hold_code)}"] if hold_code \
+                else ["空仓观望（无标的站上均线）"]
+
+        closes = {c: etf_px(c, "close") for c in book.held_codes()}
+        nav, day_ret = _book_nav(book, {c: p for c, p in closes.items() if p}, date_str)
+        book.save()
+        report_books.append(("trend", "S1 指数ETF趋势跟随", book, nav, day_ret,
+                             actions, signals))
+
+    # ---------- S2 行业轮动 ----------
+    if "rotation" in books_cfg:
+        bc = books_cfg["rotation"]
+        book = pf.Portfolio(bc.get("capital", 1000), costs_all.get(bc.get("costs")),
+                            book="rotation")
+        pending = book.data.get("pending_trades") or []
+        sells = [o for o in pending if o["action"] == "sell"]
+        buys = [o for o in pending if o["action"] == "buy"]
+        opens = _open_prices_for(book, [o["code"] for o in pending])
+        top_n = sr.get("top_n", 2)
+        actions, rest = _exec_pending_orders(book, sells + buys, opens,
+                                             sr.get("slippage", 0.001), top_n, date_str)
+        book.data["pending_trades"] = rest
+
+        reb_days = sr.get("rebalance_days", 20)
+        reb = book.data.setdefault("rebalance_state", {})
+        count = reb.get("count", 0) + 1
+        signals = []
+        if is_rebalance_due(reb_days, reb.get("last_date"), count):
+            targets, _ = rotation_targets(rot_bars, date_str, sr.get("mom_window", 20),
+                                           top_n, sr.get("min_mom", 0.0))
+            tgt = set(targets) - {"__CASH__"}
+            for code in list(book.held_codes()):
+                if code not in tgt:
+                    book.data["pending_trades"].append({
+                        "action": "sell", "code": code,
+                        "name": etfmod.ETF_NAMES.get(code, code), "date": date_str})
+                    signals.append(f"调出 {etfmod.ETF_NAMES.get(code, code)}")
+            for code in targets:
+                if code != "__CASH__" and code not in book.held_codes():
+                    book.data["pending_trades"].append({
+                        "action": "buy", "code": code, "slot": True,
+                        "name": etfmod.ETF_NAMES.get(code, code), "date": date_str})
+                    signals.append(f"调入 {etfmod.ETF_NAMES.get(code, code)}")
+            if not tgt:
+                signals.append("全池动量≤0，空仓持币")
+            reb.update({"last_date": date_str, "count": 0})
+        else:
+            reb["count"] = count
+            signals = [f"距下次调仓还需 {reb_days - count} 个交易日"]
+
+        closes = {c: etf_px(c, "close") for c in book.held_codes()}
+        nav, day_ret = _book_nav(book, {c: p for c, p in closes.items() if p}, date_str)
+        book.save()
+        report_books.append(("rotation", "S2 行业ETF轮动", book, nav, day_ret,
+                             actions, signals))
+
+    # ---------- S3 小市值轮动 ----------
+    if "smallcap" in books_cfg:
+        bc = books_cfg["smallcap"]
+        book = pf.Portfolio(bc.get("capital", 1000), costs_all.get(bc.get("costs")),
+                            book="smallcap")
+        pending = book.data.get("pending_trades") or []
+        sells = [o for o in pending if o["action"] == "sell"]
+        buys = [o for o in pending if o["action"] == "buy"]
+        opens = _open_prices_for(book, [o["code"] for o in pending])
+        top_n = ss.get("top_n", 5)
+        actions, rest = _exec_pending_orders(book, sells + buys, opens,
+                                             ss.get("slippage", 0.003), top_n, date_str)
+        book.data["pending_trades"] = rest
+
+        signals = []
+        if prev_trade and is_first_trade_day_of_month(prev_trade, date_str):
+            stocks = ds.fetch_smallest_caps(max_count=30)
+            picks = scmod.filter_smallcaps(stocks, date_str,
+                                           ss.get("min_list_days", 365),
+                                           ss.get("min_price", 2.0), top_n)
+            picks_codes = {s["code"] for s in picks}
+            for code in list(book.held_codes()):
+                if code not in picks_codes:
+                    pos = next(p for p in book.data["positions"] if p["code"] == code)
+                    book.data["pending_trades"].append({
+                        "action": "sell", "code": code, "name": pos["name"],
+                        "date": date_str})
+                    signals.append(f"调出 {pos['name']}({code})")
+            for s in picks:
+                if s["code"] not in book.held_codes():
+                    book.data["pending_trades"].append({
+                        "action": "buy", "code": s["code"], "name": s["name"],
+                        "slot": True, "date": date_str})
+                    signals.append(f"调入 {s['name']}({s['code']}) "
+                                   f"市值{s['mktcap'] / 1e8:.1f}亿")
+        else:
+            signals = ["月度策略：非月初交易日，持仓不动"]
+
+        held = list(book.held_codes())
+        snap = ds.fetch_snapshot_by_codes(held) if held else {}
+        nav, day_ret = _book_nav(
+            book, {c: s["price"] for c, s in snap.items() if s.get("price")}, date_str)
+        book.save()
+        report_books.append(("smallcap", "S3 小市值轮动", book, nav, day_ret,
+                             actions, signals))
+
+    md = report.lowfreq_daily_report(date_str, report_books)
+    notify.send(cfg, f"低频虚拟盘 {date_str}", md)
+    return 0
+
+
+def run_backtest(cfg, start_year=None, end_year=None, mode=None):
+    """历史回测。mode=None/'paband'：打板事件回测（原行为）；
+    mode='etf'/'smallcap'：低频三策略回测（backtest_lowfreq）。"""
+    if mode in ("etf", "smallcap"):
+        import backtest_lowfreq as btlf
+        md, summary = btlf.run_lowfreq_backtest(cfg, mode, start_year, end_year)
+        out = Path("data/backtest")
+        out.mkdir(parents=True, exist_ok=True)
+        (out / f"report_{mode}.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+        notify.send(cfg, f"🧪 低频回测({mode}) {summary['range']}", md)
+        return 0
+
     import backtest as bt
     md, results = bt.run_backtest(cfg, start_year, end_year)
 
@@ -441,7 +743,7 @@ def run_stats(cfg):
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ("morning", "evening", "afternoon",
-                                                "stats", "backtest"):
+                                                "stats", "backtest", "lowfreq"):
         print(__doc__)
         return 1
     cmd = sys.argv[1]
@@ -449,7 +751,7 @@ def main():
         cfg = load_config()
         # STOCK_FORCE=1 可跳过周末/节假日检查（手动测试用）
         force = os.environ.get("STOCK_FORCE") == "1"
-        if cmd in ("evening", "morning", "afternoon"):
+        if cmd in ("evening", "morning", "afternoon", "lowfreq"):
             if not force and now_cn().weekday() >= 5:
                 print("[{}] 周末（北京时间），跳过。设置 STOCK_FORCE=1 可强制运行".format(cmd))
                 return 0
@@ -459,10 +761,18 @@ def main():
             return run_morning(cfg)
         if cmd == "afternoon":
             return run_afternoon(cfg)
+        if cmd == "lowfreq":
+            return run_lowfreq(cfg)
         if cmd == "backtest":
-            start = int(sys.argv[2]) if len(sys.argv) > 2 else None
-            end = int(sys.argv[3]) if len(sys.argv) > 3 else None
-            return run_backtest(cfg, start, end)
+            # 用法: backtest [起始年 结束年]（打板，兼容原样）
+            #       backtest etf|smallcap [起始年 结束年]（低频三策略）
+            args = sys.argv[2:]
+            mode = None
+            if args and not args[0].isdigit():
+                mode = args.pop(0)
+            start = int(args[0]) if args else None
+            end = int(args[1]) if len(args) > 1 else None
+            return run_backtest(cfg, start, end, mode)
         return run_stats(cfg)
     except Exception:
         # 异常也要推送到微信——否则云端挂了你只会看到workflow变红
