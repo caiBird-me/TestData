@@ -68,6 +68,39 @@ jobs:
               dt = time.time() - t0
               print(f"[Tencent serial] {ok}/{n} ok, {dt:.1f}s, avg {dt/n:.2f}s/req")
 
+          def probe_ltb():
+              """东财datacenter龙虎榜（evening打分依赖）+ push2his指数日K（日期推断依赖）"""
+              try:
+                  r = requests.get(
+                      "https://datacenter-web.eastmoney.com/api/data/v1/get",
+                      params={"reportName": "RPT_DAILYBILLBOARD_DETAILSNEW",
+                              "columns": "ALL",
+                              "filter": "(TRADE_DATE='2026-09-04')",
+                              "sortColumns": "BILLBOARD_NET_AMT", "sortTypes": "-1",
+                              "pageSize": 5, "pageNumber": 1},
+                      timeout=(5, 15))
+                  js = r.json()
+                  rows = ((js.get("result") or {}).get("data")) or []
+                  print(f"[datacenter LTB] ok, 榜单{len(rows)}条, "
+                        f"top={rows[0]['SECURITY_NAME_ABBR']} "
+                        f"净买{rows[0]['BILLBOARD_NET_AMT']/1e8:.2f}亿" if rows
+                        else f"[datacenter LTB] HTTP通但无数据: {js.get('success')}")
+              except Exception as e:
+                  print(f"[datacenter LTB] 失败: {e}")
+              try:
+                  r = requests.get(
+                      "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+                      params={"secid": "1.000300", "fields1": "f1",
+                              "fields2": "f51", "klt": 101, "fqt": 1,
+                              "end": "20500101", "lmt": 3},
+                      timeout=(5, 10))
+                  ks = (r.json().get("data") or {}).get("klines") or []
+                  print(f"[push2his 指数日K] ok, 最近交易日: "
+                        f"{[k.split(',')[0] for k in ks]}")
+              except Exception as e:
+                  print(f"[push2his 指数日K] 失败: {e}")
+
           probe_sina()
           probe_tencent_serial()
+          probe_ltb()
           EOF
