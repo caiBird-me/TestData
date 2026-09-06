@@ -581,5 +581,36 @@ class TestBacktest(unittest.TestCase):
         self.assertIsNotNone(cb.tripped())
 
 
+class TestLayeredStats(unittest.TestCase):
+    """虚拟盘信号分层统计 vs 回测基线（过滤溢价的实证对比表）"""
+
+    def _sig(self, kind, streak, pct, year="2026"):
+        return {"status": "settled", "kind": kind, "streak": streak,
+                "pnl_pct": pct, "signal_date": f"{year}-03-10",
+                "settle_date": f"{year}-03-11"}
+
+    def test_layered_stats(self):
+        from report import layered_stats
+        sigs = [
+            self._sig("连板核心", 2, 3.0), self._sig("连板核心", 3, -2.0),
+            self._sig("主线首板", 1, 1.5), self._sig("主线首板", 1, -1.0),
+        ]
+        md = layered_stats(sigs, {"2026": -2.12})
+        self.assertIn("选股分类", md)
+        self.assertIn("连板核心 | 2 | 50.0% | +0.50%", md)
+        self.assertIn("2-3板", md)
+        self.assertIn("首板", md)
+        self.assertIn("回测基线", md)
+        # 年度精选溢价 = 全部4笔均值+0.38% - 基线(-2.12%) = +2.50%
+        self.assertIn("+2.50%", md)
+
+    def test_layered_stats_empty(self):
+        from report import layered_stats
+        self.assertEqual(layered_stats([], {}), "")
+        # 不足3笔不出表（噪声大）
+        sigs = [self._sig("连板核心", 2, 3.0)]
+        self.assertEqual(layered_stats(sigs, {}), "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -177,7 +177,7 @@ def morning_report(date_str, plan, rejected, risk_rules, pause,
 
 
 def stats_report(date_str, stats, portfolio, mv):
-    """统计报告"""
+    """统计报告（含分层统计：实盘精选 vs 回测全样本基线）"""
     initial = portfolio["initial_capital"]
     ret_pct = (mv - initial) / initial * 100
     lines = [f"## 📈 虚拟盘统计 {date_str}", ""]
@@ -208,6 +208,87 @@ def stats_report(date_str, stats, portfolio, mv):
                 f"- {s['settle_date']} {s['name']}({s['code']}) "
                 f"{s['pnl_pct']:+.2f}%（{s['buy_price']}→{s['settle_price']}）{s['reason']}"
             )
+    lines.append(layered_stats(_signals, _baseline))
+    return "\n".join(lines)
+
+
+_baseline = {}  # 回测全样本基线 {year: avg_pct}，由 main 注入
+
+
+def set_baseline(by_year):
+    global _baseline
+    _baseline = by_year or {}
+
+
+def _layer_of(rs):
+    """单层统计：笔数/胜率/单笔期望"""
+    if not rs:
+        return None
+    wins = [r for r in rs if r["pnl_pct"] > 0]
+    return {"n": len(rs), "win_rate": round(len(wins) / len(rs) * 100, 1),
+            "avg_pct": round(sum(r["pnl_pct"] for r in rs) / len(rs), 2)}
+
+
+def layered_stats(signals, baseline):
+    """信号分层统计 vs 回测全样本基线——验证过滤溢价的实证对比。
+
+    回测已证明无差别接板是负期望（-2.12%/笔），实盘策略的价值全在
+    过滤（主线/封板质量/情绪闸门）。本表把已结算信号按选股分类和
+    连板数分层，与全样本基线逐年对比：差值就是"精选溢价"，
+    需要长期 ≥ +2.1% 才能证明策略成立。样本 < 20 笔时数字噪声大，
+    只作参考。
+    """
+    settled = [s for s in signals
+               if s.get("status") == "settled" and s.get("pnl_pct") is not None]
+    if len(settled) < 3:
+        return ""
+
+    lines = ["", "**📊 分层统计 vs 回测基线**（实盘精选是否跑赢无差别接板）", ""]
+
+    lines.append("| 选股分类 | 笔数 | 胜率 | 单笔期望 |")
+    lines.append("|---|---|---|---|")
+    by_kind = {}
+    for s in settled:
+        by_kind.setdefault(s.get("kind") or "未知", []).append(s)
+    for kind, rs in sorted(by_kind.items(), key=lambda kv: -len(kv[1])):
+        st = _layer_of(rs)
+        lines.append(f"| {kind} | {st['n']} | {st['win_rate']}% | {st['avg_pct']:+.2f}% |")
+    lines.append("")
+
+    lines.append("| 连板 | 笔数 | 胜率 | 单笔期望 |")
+    lines.append("|---|---|---|---|")
+    bands = [("首板", 1, 1), ("2-3板", 2, 3), ("4板", 4, 4), ("5板+", 5, 99)]
+    by_streak = {}
+    for s in settled:
+        k = s.get("streak") or 1
+        by_streak.setdefault(
+            next(label for label, lo, hi in bands if lo <= k <= hi), []).append(s)
+    for label, _, _ in bands:
+        rs = by_streak.get(label)
+        if rs:
+            st = _layer_of(rs)
+            lines.append(f"| {label} | {st['n']} | {st['win_rate']}% | {st['avg_pct']:+.2f}% |")
+    lines.append("")
+
+    if baseline:
+        lines.append("| 年份 | 笔数 | 实盘期望 | 回测基线 | 精选溢价 |")
+        lines.append("|---|---|---|---|---|")
+        by_year = {}
+        for s in settled:
+            y = (s.get("settle_date") or s.get("signal_date") or "")[:4]
+            if y:
+                by_year.setdefault(y, []).append(s)
+        for y in sorted(by_year):
+            st = _layer_of(by_year[y])
+            base = baseline.get(y)
+            edge = f"{st['avg_pct'] - base:+.2f}%" if base is not None else "—"
+            base_s = f"{base:+.2f}%" if base is not None else "无基线"
+            lines.append(f"| {y} | {st['n']} | {st['avg_pct']:+.2f}% | {base_s} | {edge} |")
+        lines.append("")
+        lines.append(f"_全样本基线 = 回测2019-2026无差别接板单笔期望；"
+                     f"精选溢价长期应≥+2.1%（对冲基线-2.12%）；"
+                     f"当前样本{len(settled)}笔_")
+
     return "\n".join(lines)
 
 

@@ -372,6 +372,22 @@ def run_backtest(cfg, start_year=None, end_year=None):
     return 0
 
 
+def _load_backtest_baseline():
+    """读取回测基线（全样本无差别接板分年单笔期望），供stats分层对比。
+
+    基线来自 data/backtest/report.json（backtest 任务自动提交回仓库）。
+    """
+    path = Path("data/backtest/report.json")
+    if not path.exists():
+        return {}
+    try:
+        by_year = json.loads(path.read_text(encoding="utf-8")).get("by_year") or {}
+        return {y: round(sum(pcts) / len(pcts), 2)
+                for y, pcts in by_year.items() if pcts}
+    except (ValueError, OSError):
+        return {}
+
+
 def run_stats(cfg):
     """统计"""
     rules = RiskRules(cfg)
@@ -393,6 +409,7 @@ def run_stats(cfg):
 
     stats = portfolio.stats()
     report.set_signals(portfolio.signals)
+    report.set_baseline(_load_backtest_baseline())
     md = report.stats_report(date_str, stats, portfolio.data, mv)
 
     if stop_hits:
