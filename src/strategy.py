@@ -222,11 +222,12 @@ def morning_confirm(candidates, snapshot, cfg, first_minutes=None):
     first_minutes: {code: 09:31分钟K} 成交可行性校验用（可选，无则跳过）
     返回 (最终作战计划, 被拒列表)
 
-    三层过滤：
-    1. gap 过滤（低开<-2% / 高开>7%）
-    2. buy_range 校验：竞价价必须落在晚间计划的买入区间内（±2%），
-       否则"计划说不买但虚拟盘买了"——推荐与执行脱节
-    3. 成交可行性：09:31 已封涨停的票（秒板/快速封板）标记 unfillable，
+    两层过滤：
+    1. gap 过滤（低开<-2% / 高开>7%）——唯一的高开/低开约束，与回测
+       simulate_event 的 gap 窗口 [-2%, +7%] 完全同口径。曾有 buy_range(±2%)
+       校验与之叠加，使实盘实际执行 [-2%,+2%] 而回测验证 [-2%,+7%]——
+       两个策略（buy_range 字段保留仅作报告展示的"计划区间"参考）
+    2. 成交可行性：09:31 已封涨停的票（秒板/快速封板）标记 unfillable，
        虚拟盘取消成交——"赢家买不进，输家随便买"是系统性正向偏差
     """
     st = cfg["strategy"]
@@ -246,11 +247,6 @@ def morning_confirm(candidates, snapshot, cfg, first_minutes=None):
             if not rk.affordable(s["price"]):
                 rejected.append((c, f"价格{s['price']}元超出仓位可承受范围"))
                 continue
-        # buy_range 校验：竞价价超出晚间计划区间 → 计划已失效，不追
-        low, high = c.get("buy_range") or (0, 0)
-        if low and high and not (low <= s["price"] <= high):
-            rejected.append((c, f"竞价价{s['price']:.2f}元超出计划区间{low:.2f}~{high:.2f}元"))
-            continue
         shares, amount = rk.calc_shares(s["price"]) if rk else (0, 0)
         if shares <= 0:
             rejected.append((c, f"价格{s['price']}元太贵，一手需{s['price']*100:.0f}元"))

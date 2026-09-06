@@ -1,13 +1,16 @@
 name: 每日股票分析
-# 北京时间与UTC时差恒定8小时且不跨日错位（北京09:20 = 当日UTC 01:20）
-# 北京时间 15:10 收盘复盘（UTC 07:10）/ 09:20 竞价确认（UTC 01:20）
+# 北京时间与UTC时差恒定8小时且不跨日错位（北京09:32 = 当日UTC 01:32）
+# 北京时间 15:10 收盘复盘（UTC 07:10）/ 09:32 开盘确认买入（UTC 01:32）/ 14:45 尾卖提醒（UTC 06:45）
 # SendKey 通过 GitHub Secrets 的 SERVERCHAN_KEY 注入，绝不写入任何随仓库提交的文件
 on:
   schedule:
     - cron: '10 7 * * 1-5'   # 北京 15:10 周一~周五
-    - cron: '27 1 * * 1-5'   # 北京 09:27 周一~周五（竞价已定09:25、开盘前，买入价为确定的竞价成交价，
-                              #   避开09:20-09:25撤单高发窗口的虚价）
-  workflow_dispatch:          # 支持手动触发（选 morning/evening/backtest）
+    - cron: '32 1 * * 1-5'   # 北京 09:32 周一~周五。09:31分钟K已生成：成交可行性校验与
+                              #   滑点修正真正生效（09:27运行时分钟K不存在，校验恒跳过）；
+                              #   推送约09:33到达，人工09:35前下单仍在可操作窗口内
+    - cron: '45 6 * * 1-5'   # 北京 14:45 周一~周五。收盘前15分钟的尾卖提醒——
+                              #   T+1卖出指令在15:10收盘后推送则人工无法执行
+  workflow_dispatch:          # 支持手动触发（选 morning/evening/afternoon/backtest）
     inputs:
       job:
         description: '运行哪个任务'
@@ -17,6 +20,7 @@ on:
         options:
           - evening
           - morning
+          - afternoon
           - stats
           - backtest
       start_year:
@@ -96,6 +100,29 @@ jobs:
           git diff --cached --quiet || git commit -m "data: morning $(date -u +%F)"
           git push
 
+  afternoon:
+    # 尾卖提醒（14:45）：只推送不改账，记账统一在15:10 evening（用收盘价）
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.job == 'afternoon'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 单元测试
+        run: python -m unittest discover -s tests -v
+
+      - name: 尾盘提醒
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python src/main.py afternoon
+
   stats:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'stats'
     runs-on: ubuntu-latest
@@ -116,10 +143,10 @@ jobs:
         run: python src/main.py stats
 
   backtest:
-    # 全市场日K扫描（~5400只，10-20分钟），必须在云端跑——本地网络 push2his 不通
+    # 全市场日K扫描（~5400只，新浪源单请求全历史，6并发约20-40分钟）
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'backtest'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -137,6 +164,9 @@ jobs:
       - name: 历史回测
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          # Python stdout块缓冲曾让60分钟运行的日志全被吞掉（杀进程时缓冲区丢弃）
+          # ——排障时完全黑盒，强制行缓冲让日志实时可见
+          PYTHONUNBUFFERED: 1
         run: |
           ARGS=""
           [ -n "${{ github.event.inputs.start_year }}" ] && ARGS="$ARGS ${{ github.event.inputs.start_year }}"

@@ -28,6 +28,33 @@ def _save(path, obj):
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def decide_settlement(position, price, is_limit_up_today, today):
+    """持仓卖出决策（纯函数）：收盘结算（settle_positions）与 14:45 尾卖提醒
+    （run_afternoon）共用同一套规则，保证"提醒的"和"记账的"不脱节。
+
+    position: data/positions 里的一条持仓
+    price: 判定用现价（收盘结算传收盘价，尾卖提醒传14:45现价）
+    is_limit_up_today: 该票今日是否涨停
+    today: "YYYY-MM-DD"
+    返回 {"action": "sell"/"hold", "reason": 展示用, "sell_reason": 卖出原因}
+
+    规则（按优先级）：
+    1. 今日刚买入 → 持有（T+1当日不可卖，即使破止损也只能等次日早盘
+       竞价处理——推送"立即卖出"属于不可执行指令）
+    2. 现价 ≤ 止损价 → 止损卖出
+    3. 今日涨停 → 继续持有（让利润奔跑）
+    4. 买入满 1 个交易日（T+1 可卖）→ 尾盘卖出
+    """
+    if position.get("buy_date", "") >= today:
+        return {"action": "hold", "reason": "今日买入，T+1明日可卖"}
+    stop = position.get("stop_loss") or 0
+    if stop and price <= stop:
+        return {"action": "sell", "reason": "触发止损", "sell_reason": "止损"}
+    if is_limit_up_today:
+        return {"action": "hold", "reason": "今日涨停，继续持有"}
+    return {"action": "sell", "reason": "T+1尾盘卖出", "sell_reason": "T+1尾盘卖出"}
+
+
 class Portfolio:
     # 默认交易成本：佣金万2.5最低5元/笔，印花税万5（仅卖出）。
     # 3k资金每笔几乎都触发5元最低佣金——一轮买卖约11元（占1500元仓位0.73%），
@@ -167,11 +194,7 @@ class Portfolio:
 
         snapshot: {code: stock}，收盘后 price 即收盘价
         limit_up_codes: 今日涨停股代码集合
-        规则（按优先级）：
-        1. 收盘价 ≤ 止损价 → 止损卖出
-        2. 今日涨停 → 继续持有（让利润奔跑）
-        3. 买入满 1 个交易日（T+1 可卖）→ 尾盘按收盘价卖出
-        4. 今日刚买入 → 明日再看
+        规则见 decide_settlement（与 14:45 尾卖提醒共用同一纯函数）。
         """
         results = []
         for p in list(self.data["positions"]):
@@ -181,24 +204,15 @@ class Portfolio:
                                 "action": "hold", "reason": "无行情，继续持有"})
                 continue
             price = st["price"]
-            stop = p.get("stop_loss") or 0
-            if stop and price <= stop:
-                pnl, pnl_pct = self.sell(p["code"], price, "止损")
+            d = decide_settlement(p, price, p["code"] in limit_up_codes, date_str)
+            if d["action"] == "sell":
+                pnl, pnl_pct = self.sell(p["code"], price, d["sell_reason"])
                 results.append({"code": p["code"], "name": p["name"], "action": "sell",
-                                "reason": "触发止损", "buy_price": p["buy_price"],
-                                "price": price, "pnl_pct": pnl_pct})
-            elif p["code"] in limit_up_codes:
-                results.append({"code": p["code"], "name": p["name"], "action": "hold",
-                                "reason": "今日涨停，继续持有", "buy_price": p["buy_price"],
-                                "price": price})
-            elif p["buy_date"] < date_str:
-                pnl, pnl_pct = self.sell(p["code"], price, "T+1尾盘卖出")
-                results.append({"code": p["code"], "name": p["name"], "action": "sell",
-                                "reason": "T+1尾盘卖出", "buy_price": p["buy_price"],
+                                "reason": d["reason"], "buy_price": p["buy_price"],
                                 "price": price, "pnl_pct": pnl_pct})
             else:
                 results.append({"code": p["code"], "name": p["name"], "action": "hold",
-                                "reason": "今日买入，T+1明日可卖", "buy_price": p["buy_price"],
+                                "reason": d["reason"], "buy_price": p["buy_price"],
                                 "price": price})
         return results
 

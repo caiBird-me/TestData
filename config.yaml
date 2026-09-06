@@ -34,9 +34,9 @@ strategy:
   slippage_pct: 0.003        # 虚拟盘买入滑点0.3%：竞价价是虚拟撮合价，
                              # 真实成交在09:30后市价，强势股往往快速上冲
 
-# 历史事件回测（py src/main.py backtest，建议云端Actions跑——本地网络push2his不通）
+# 历史事件回测（py src/main.py backtest，本地/云端均可跑）
 backtest:
-  workers: 3                # 全市场日K并发拉取线程数（6会被东财对海外IP限流，实测92%失败）
+  workers: 6                # K线并发拉取线程数（新浪主源；腾讯备源时建议调低防WAF）
   max_events_per_day: 2     # 每日模拟事件上限（对应实盘 max_stocks）
 
 notify:
@@ -47,4 +47,4 @@ notify:
   # 推送渠道: serverchan / console / both
   channel: "both"
 
-schedule_note: "云端GitHub Actions: 北京时间 15:10 收盘复盘 / 09:20 竞价确认"
+schedule_note: "云端GitHub Actions: 北京时间 15:10 收盘复盘 / 09:32 开盘确认买入 / 14:45 尾卖提醒"

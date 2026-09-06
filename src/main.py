@@ -2,9 +2,10 @@
 """A股短线动量/打板分析系统 入口
 
 用法:
-  py src/main.py evening   # 收盘复盘（15:10后）
-  py src/main.py morning   # 竞价确认（09:15~09:25）
-  py src/main.py stats     # 虚拟盘统计
+  py src/main.py evening    # 收盘复盘（15:10后）
+  py src/main.py morning    # 开盘确认买入（09:32）
+  py src/main.py afternoon  # 尾盘提醒（14:45）：T+1卖出/止损提醒，只推送不改账
+  py src/main.py stats      # 虚拟盘统计
   py src/main.py backtest [起始年 结束年]  # 历史事件回测（建议云端跑）
 """
 import json
@@ -158,7 +159,8 @@ def _load_sentiment():
 
 
 def run_morning(cfg):
-    """竞价确认：过滤昨晚信号 → 作战计划 → 只按计划虚拟买入 → 推送"""
+    """开盘确认：过滤昨晚信号 → 作战计划 → 只按计划虚拟买入 → 推送。
+    09:32 运行：09:31 分钟K已生成，成交可行性校验与滑点修正恒生效。"""
     rules = RiskRules(cfg)
     cfg["_risk"] = rules
     date_str = now_cn().strftime("%Y-%m-%d")
@@ -201,8 +203,8 @@ def run_morning(cfg):
     snapshot = ds.fetch_snapshot_by_codes(list(set(codes) | set(held_codes)))
 
     # 成交可行性：拉当日09:31分钟K（开盘后第一分钟的真实成交区间）。
-    # 注意 morning 运行在09:27时当日分钟K尚不存在——分钟K校验仅在
-    # 09:31后有效；09:27运行时跳过（此时买涨停板排队逻辑由人工判断）
+    # morning 定时在09:32运行（daily.yml cron），此时分钟K恒存在、校验恒生效；
+    # 09:31门槛仅作为提前手动运行时的兜底跳过
     first_minutes = {}
     if now_cn().hour * 60 + now_cn().minute >= 9 * 60 + 31:
         for c in codes:
@@ -236,7 +238,8 @@ def run_morning(cfg):
         portfolio.save()
 
     # 市场情绪总开关（两道闸）：
-    # a) 昨日涨停股今日平均表现 < 0 = 亏钱效应（实时，竞价/盘中价格）
+    # a) 昨日涨停股今日平均表现 < 0 = 亏钱效应（实时，09:32用开盘实价计算，
+    #    比旧09:27竞价价的噪声小——竞价虚价易误开关，此为有意口径）
     # b) 昨日收盘计算的晋级率 < 15% = 接力退潮（均涨幅为正可能是炸板拉平的假象，
     #    晋级率直接反映资金愿不愿意接昨天的板——更前瞻）
     sentiment, lu_count = ds.calc_sentiment()
@@ -285,10 +288,66 @@ def run_morning(cfg):
     return 0
 
 
+def run_afternoon(cfg):
+    """尾盘提醒（14:45）：收盘前15分钟的最后可操作窗口。
+
+    T+1 尾盘卖出指令若在 15:10 evening（收盘后）才推送，人工物理上无法执行——
+    本任务把卖出/持有判断提前到 14:45 推送。只提醒不改账：记账统一在 15:10
+    evening 用收盘价结算（与 14:45 现价的口径差异很小）。
+    """
+    date_str = now_cn().strftime("%Y-%m-%d")
+
+    if not ds.is_today_trading_day():
+        print("[afternoon] 今日非交易日（行情时间戳未更新），跳过")
+        return 0
+
+    portfolio = pf.Portfolio(cfg["capital"]["total"], cfg.get("trading_costs"))
+    positions = portfolio.data["positions"]
+    if not positions:
+        notify.send(cfg, f"尾盘提醒 {date_str}",
+                    f"## 🕐 尾盘提醒 {date_str}\n\n当前无持仓，尾盘无操作。")
+        return 0
+
+    snap = ds.fetch_snapshot_by_codes(list(portfolio.held_codes()))
+    # 涨停判断用自身快照（千股涨停日 top400 截断会误判，同 run_evening 口径）
+    lu_codes = {c for c, s in snap.items() if ds.is_limit_up(s)}
+
+    urgent, calm = [], []
+    for p in positions:
+        s = snap.get(p["code"])
+        if not s or s["price"] <= 0:
+            calm.append(f"- ⏳ {p['name']}({p['code']}): 无行情，继续持有")
+            continue
+        price = s["price"]
+        d = pf.decide_settlement(p, price, p["code"] in lu_codes, date_str)
+        pnl_pct = (price - p["buy_price"]) / p["buy_price"] * 100 if p["buy_price"] else 0
+        base = (f"{p['name']}({p['code']}) 现价{price:.2f}元（{pnl_pct:+.1f}%，"
+                f"止损{p.get('stop_loss') or 0:.2f}元）")
+        if d["action"] == "sell" and d["reason"] == "触发止损":
+            urgent.append(f"- ⛔ **立即卖出** {base} —— 已破止损价")
+        elif d["action"] == "sell":
+            urgent.append(f"- 📉 **尾盘卖出** {base} —— T+1到期，按规则卖出")
+        elif "涨停" in d["reason"]:
+            calm.append(f"- 🔒 继续持有 {base} —— 今日涨停")
+        else:
+            calm.append(f"- ⏳ 持有观察 {base} —— T+1明日可卖")
+
+    md = f"## 🕐 尾盘提醒 {date_str}\n"
+    if urgent:
+        md += "\n**需要操作（收盘前15分钟）：**\n" + "\n".join(urgent)
+    if calm:
+        md += "\n\n**无需操作：**\n" + "\n".join(calm)
+    title = f"⛔止损卖出 {date_str}" if any("立即卖出" in u for u in urgent) \
+        else (f"📉尾盘卖出 {date_str}" if urgent else f"尾盘提醒 {date_str}")
+    notify.send(cfg, title, md)
+    return 0
+
+
 def run_backtest(cfg, start_year=None, end_year=None):
     """历史事件回测：全市场日K自建涨停日历 → 模拟策略 → 统计报告。
 
-    注意：需要 push2his（多年日K），本地网络不通时请在云端 Actions 手动触发。
+    数据源：baostock（主，多进程并行）→ 腾讯（备）。全市场规模本地约1小时、
+    云端约2小时；K线有当日磁盘缓存，中断重跑只补未完成的部分。
     """
     import backtest as bt
     md, results = bt.run_backtest(cfg, start_year, end_year)
@@ -345,7 +404,8 @@ def run_stats(cfg):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("morning", "evening", "stats", "backtest"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("morning", "evening", "afternoon",
+                                                "stats", "backtest"):
         print(__doc__)
         return 1
     cmd = sys.argv[1]
@@ -353,7 +413,7 @@ def main():
         cfg = load_config()
         # STOCK_FORCE=1 可跳过周末/节假日检查（手动测试用）
         force = os.environ.get("STOCK_FORCE") == "1"
-        if cmd in ("evening", "morning"):
+        if cmd in ("evening", "morning", "afternoon"):
             if not force and now_cn().weekday() >= 5:
                 print("[{}] 周末（北京时间），跳过。设置 STOCK_FORCE=1 可强制运行".format(cmd))
                 return 0
@@ -361,6 +421,8 @@ def main():
             return run_evening(cfg)
         if cmd == "morning":
             return run_morning(cfg)
+        if cmd == "afternoon":
+            return run_afternoon(cfg)
         if cmd == "backtest":
             start = int(sys.argv[2]) if len(sys.argv) > 2 else None
             end = int(sys.argv[3]) if len(sys.argv) > 3 else None

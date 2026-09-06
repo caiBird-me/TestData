@@ -15,9 +15,7 @@ jobs:
           cache: pip
 
       - name: 安装依赖
-        run: |
-          pip install -r requirements.txt
-          pip install baostock
+        run: pip install -r requirements.txt
 
       - name: 探测数据源
         env:
@@ -33,6 +31,27 @@ jobs:
                    "sh600050", "sh600089", "sh600104", "sh600196", "sh600519",
                    "sz000001", "sz000002", "sz000063", "sz000333", "sz000651"]
 
+          def probe_sina(n=10, workers=6):
+              """新浪getKLineData：回测主源（单请求全历史）"""
+              def one(sym):
+                  try:
+                      r = requests.get(
+                          "https://money.finance.sina.com.cn/quotes_service/api/"
+                          "json_v2.php/CN_MarketData.getKLineData",
+                          params={"symbol": sym, "scale": "240", "ma": "no",
+                                  "datalen": "2000"},
+                          timeout=(5, 15))
+                      rows = r.json() or []
+                      return 1 if len(rows) > 1000 else 0
+                  except Exception:
+                      return 0
+              t0 = time.time()
+              with ThreadPoolExecutor(max_workers=workers) as ex:
+                  oks = list(ex.map(one, VALID[:n]))
+              dt = time.time() - t0
+              print(f"[Sina {workers}线程] {sum(oks)}/{n} ok, {dt:.1f}s, "
+                    f"吞吐 {n/dt:.1f} 只/秒 -> 5400只约 {5400/(n/dt)/60:.0f} 分钟")
+
           def probe_tencent_serial(n=20):
               ok = fail = 0
               t0 = time.time()
@@ -43,60 +62,12 @@ jobs:
                           params={"param": f"{sym},day,2025-01-01,2025-03-01,10,"},
                           timeout=(5, 10))
                       d = (r.json().get("data") or {}).get(sym) or {}
-                      if d.get("day"):
-                          ok += 1
-                      else:
-                          fail += 1
+                      ok += 1 if d.get("day") else 0
                   except Exception:
                       fail += 1
               dt = time.time() - t0
               print(f"[Tencent serial] {ok}/{n} ok, {dt:.1f}s, avg {dt/n:.2f}s/req")
 
-          def probe_tencent_concurrent(n=40, workers=8):
-              """8并发连发40请求：测腾讯是否限制并发"""
-              def one(sym):
-                  try:
-                      r = requests.get(
-                          "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
-                          params={"param": f"{sym},day,2019-01-01,2026-12-31,640,"},
-                          timeout=(5, 15))
-                      d = (r.json().get("data") or {}).get(sym) or {}
-                      return 1 if d.get("day") else 0
-                  except Exception:
-                      return 0
-              syms = (VALID * 2)[:n]
-              t0 = time.time()
-              with ThreadPoolExecutor(max_workers=workers) as ex:
-                  results = list(ex.map(one, syms))
-              dt = time.time() - t0
-              print(f"[Tencent {workers}并发] {sum(results)}/{n} ok, {dt:.1f}s, "
-                    f"吞吐 {n/dt:.1f} req/s -> 5900只x3请求约 {5900*3/(n/dt)/60:.0f} 分钟")
-
-          def probe_baostock(n=5):
-              import baostock as bs
-              lg = bs.login()
-              print(f"[baostock] login: {lg.error_code} {lg.error_msg}")
-              codes = ["sh.600000", "sz.000001", "sz.300750", "sh.688981", "sz.002594"]
-              t0 = time.time()
-              total = 0
-              for c in codes[:n]:
-                  rs = bs.query_history_k_data_plus(
-                      c, "date,open,high,low,close,volume,pctChg",
-                      start_date="2019-01-01", end_date="2026-12-31",
-                      frequency="d", adjustflag="3")
-                  rows = []
-                  while rs.next():
-                      rows.append(rs.get_row_data())
-                  total += len(rows)
-              dt = time.time() - t0
-              print(f"[baostock] {n} stocks {total} rows in {dt:.1f}s, "
-                    f"avg {dt/n:.2f}s/stock -> 5900只约 {dt/n*5900/60:.0f} 分钟(单线程)")
-              bs.logout()
-
+          probe_sina()
           probe_tencent_serial()
-          probe_tencent_concurrent()
-          try:
-              probe_baostock()
-          except Exception as e:
-              print(f"[baostock] FAIL: {e!r}")
           EOF

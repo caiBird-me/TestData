@@ -298,8 +298,8 @@ class TestSealQuality(unittest.TestCase):
         self.assertEqual(seal_quality_bonus(None), 0)
 
 
-
-    """morning_confirm 三层过滤：gap / buy_range / 成交可行性"""
+class TestMorningConfirm(unittest.TestCase):
+    """morning_confirm 两层过滤：gap（与回测同口径）/ 成交可行性"""
 
     def _cfg(self):
         cfg = {**CFG, "strategy": {**CFG["strategy"], "final_picks": 2,
@@ -312,29 +312,39 @@ class TestSealQuality(unittest.TestCase):
         return {"code": "600001", "name": "测试", "board": "机器人", "kind": "主线首板",
                 "streak": 1, "stop_loss": 9.5, "buy_range": [9.8, 10.2]}
 
-    def test_buy_range_rejects_out_of_range(self):
-        """竞价+6%超出±2%计划区间：计划已失效，不买"""
+    def test_gap_5pct_passes(self):
+        """高开+5%必须通过：gap过滤是唯一高开约束（与回测[-2%,+7%]同口径）。
+        曾有buy_range(±2%)叠加把实盘过滤压成[-2%,+2%]而回测验证[-2%,+7%]——回归测试防止口径再分叉"""
         from strategy import morning_confirm
-        snap = {"600001": make_stock("600001", 6, 10.6, 10.7)}
+        snap = {"600001": make_stock("600001", 5, 10.5, 10.6)}
+        plan, rejected = morning_confirm([self._cand()], snap, self._cfg())
+        self.assertEqual(len(plan), 1)
+        self.assertEqual(plan[0]["open_price"], 10.5)
+        self.assertEqual(rejected, [])
+
+    def test_gap_75pct_rejected(self):
+        """高开+7.5%：被gap过滤拒绝（>7%上限）"""
+        from strategy import morning_confirm
+        snap = {"600001": make_stock("600001", 7.5, 10.75, 10.8)}
         plan, rejected = morning_confirm([self._cand()], snap, self._cfg())
         self.assertEqual(plan, [])
-        self.assertIn("超出计划区间", rejected[0][1])
+        self.assertEqual(len(rejected), 1)
 
-    def test_buy_range_accepts_in_range(self):
+    def test_normal_open_passes(self):
         from strategy import morning_confirm
         snap = {"600001": make_stock("600001", 1, 10.1, 10.2)}
         plan, _ = morning_confirm([self._cand()], snap, self._cfg())
         self.assertEqual(len(plan), 1)
         self.assertEqual(plan[0]["open_price"], 10.1)
+        # buy_range字段保留在计划里（报告展示"计划区间"参考），不再参与过滤
+        self.assertEqual(plan[0]["buy_range"], [9.8, 10.2])
 
     def test_unfillable_opening_limit(self):
         """09:31整分钟封死涨停（low=high）：标记unfillable，虚拟盘取消"""
         from strategy import morning_confirm
         snap = {"600001": make_stock("600001", 3, 10.3, 10.3)}
         fm = {"600001": {"open": 11.0, "high": 11.0, "low": 11.0, "close": 11.0}}
-        cand = self._cand()
-        cand["buy_range"] = [9.8, 11.5]  # 放宽区间让gap检查通过
-        plan, _ = morning_confirm([cand], snap, self._cfg(), fm)
+        plan, _ = morning_confirm([self._cand()], snap, self._cfg(), fm)
         self.assertTrue(plan[0].get("unfillable"))
 
     def test_fillable_with_intraday_range(self):
@@ -342,10 +352,48 @@ class TestSealQuality(unittest.TestCase):
         from strategy import morning_confirm
         snap = {"600001": make_stock("600001", 3, 10.3, 10.4)}
         fm = {"600001": {"open": 10.3, "high": 10.5, "low": 10.2, "close": 10.4}}
-        cand = self._cand()
-        cand["buy_range"] = [9.8, 10.6]
-        plan, _ = morning_confirm([cand], snap, self._cfg(), fm)
+        plan, _ = morning_confirm([self._cand()], snap, self._cfg(), fm)
         self.assertFalse(plan[0].get("unfillable", False))
+
+
+class TestDecideSettlement(unittest.TestCase):
+    """持仓卖出决策（收盘结算与14:45尾卖提醒共用的同一套规则）"""
+
+    def _pos(self, buy_date="2026-09-02", stop_loss=9.5, buy_price=10.0):
+        return {"code": "600001", "name": "测试", "buy_price": buy_price,
+                "buy_date": buy_date, "stop_loss": stop_loss}
+
+    def test_stop_loss_sells(self):
+        from portfolio import decide_settlement
+        d = decide_settlement(self._pos(), 9.4, False, "2026-09-03")
+        self.assertEqual(d["action"], "sell")
+        self.assertEqual(d["sell_reason"], "止损")
+
+    def test_limit_up_holds(self):
+        from portfolio import decide_settlement
+        d = decide_settlement(self._pos(), 10.5, True, "2026-09-03")
+        self.assertEqual(d["action"], "hold")
+        self.assertIn("涨停", d["reason"])
+
+    def test_t1_expiry_sells(self):
+        from portfolio import decide_settlement
+        d = decide_settlement(self._pos(), 10.2, False, "2026-09-03")
+        self.assertEqual(d["action"], "sell")
+        self.assertEqual(d["sell_reason"], "T+1尾盘卖出")
+
+    def test_same_day_holds(self):
+        """当日买入T+1不可卖：即使破止损价也只能持有观察（次日早盘竞价处理）"""
+        from portfolio import decide_settlement
+        d = decide_settlement(self._pos(buy_date="2026-09-03"), 9.4, False, "2026-09-03")
+        self.assertEqual(d["action"], "hold")
+        self.assertIn("T+1", d["reason"])
+
+    def test_no_stop_loss_field(self):
+        """无止损价的持仓不触发止损卖出"""
+        from portfolio import decide_settlement
+        d = decide_settlement(self._pos(stop_loss=0), 9.0, False, "2026-09-03")
+        self.assertEqual(d["action"], "sell")
+        self.assertEqual(d["sell_reason"], "T+1尾盘卖出")
 
 
 class TestBacktest(unittest.TestCase):
@@ -374,21 +422,71 @@ class TestBacktest(unittest.TestCase):
         self.assertEqual(limit_threshold("688001"), 19.85)
         self.assertEqual(limit_threshold("830001"), 29.7)
 
-    def test_build_events(self):
-        from backtest import build_events
-        ev = build_events({"600000": self._bars()}, 2026, 2026)
-        self.assertIn("2026-09-01", ev)
-        self.assertEqual(ev["2026-09-01"][0][1], 1)  # 首板
+    def test_bj_code_filter(self):
+        """北交所代码识别（baostock/腾讯均无北证K线，回测剔除）"""
+        from backtest import is_bj_code
+        self.assertTrue(is_bj_code("430047"))
+        self.assertTrue(is_bj_code("832566"))
+        self.assertTrue(is_bj_code("920008"))
+        self.assertFalse(is_bj_code("600000"))
+        self.assertFalse(is_bj_code("000001"))
+        self.assertFalse(is_bj_code("300750"))
+
+    def test_bars_with_pct(self):
+        """腾讯原始K线 → 附加相邻日涨跌幅（除权日失真是已知披露偏差）"""
+        from backtest import bars_with_pct
+        # [date, open, close, high, low]（腾讯字段序：close是第2列）
+        raw = [["2026-09-01", 9.5, 10.0, 10.0, 9.4],
+               ["2026-09-02", 10.3, 10.4, 10.5, 10.2],
+               ["2026-09-03", 10.4, 10.4, 10.6, 10.3]]
+        bars = bars_with_pct(raw)
+        self.assertEqual(bars[0]["pct"], 0.0)  # 首日无前收
+        self.assertAlmostEqual(bars[1]["pct"], 4.0, places=2)
+        self.assertAlmostEqual(bars[2]["pct"], 0.0, places=2)
+        self.assertEqual(bars[1]["close"], 10.4)
+        self.assertEqual(bars[1]["high"], 10.5)
+
+    def test_exdiv_miss_detector(self):
+        """收盘=最高但涨幅落在涨停-3%~-0.15%：除权日漏检近似口径（上界估计）"""
+        from backtest import is_probably_exdiv_miss
+        self.assertFalse(is_probably_exdiv_miss(
+            {"pct": 9.9, "close": 10.0, "high": 10.0}, "600000"))  # 真涨停
+        self.assertFalse(is_probably_exdiv_miss(
+            {"pct": 5.0, "close": 10.0, "high": 10.0}, "600000"))  # 涨幅太低
+        self.assertFalse(is_probably_exdiv_miss(
+            {"pct": 7.0, "close": 10.0, "high": 10.5}, "600000"))  # 没收在最高
+        self.assertTrue(is_probably_exdiv_miss(
+            {"pct": 8.0, "close": 10.0, "high": 10.0}, "600000"))  # 疑似除权涨停
+
+    def test_scan_events(self):
+        from backtest import scan_stock_events
+        results, exdiv, n_detected = scan_stock_events(
+            "600000", self._bars(), 2026, 2026)
+        self.assertEqual(exdiv, 0)  # 无除权嫌疑日
+        self.assertEqual(n_detected, 1)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["streak"], 1)  # 首板
+        self.assertEqual(results[0]["date"], "2026-09-02")  # 买入日=D+1
 
     def test_streak_counting(self):
-        from backtest import build_events
+        from backtest import scan_stock_events
+        # 3连板（开盘价控制gap在-2%~+7%内，模拟才能成交）
         bars = [
-            {"date": f"2026-09-0{i}", "open": 10, "close": 11, "high": 11,
-             "low": 10, "volume": 1, "pct": 10.0}
-            for i in range(1, 4)
-        ] + self._bars()[2:]
-        ev = build_events({"600000": bars}, 2026, 2026)
-        self.assertEqual(ev["2026-09-03"][0][1], 3)  # 3连板
+            {"date": "2026-09-01", "open": 10.0, "close": 11.0, "high": 11.0,
+             "low": 9.9, "volume": 1, "pct": 10.0},
+            {"date": "2026-09-02", "open": 10.9, "close": 12.1, "high": 12.1,
+             "low": 10.8, "volume": 1, "pct": 10.0},
+            {"date": "2026-09-03", "open": 12.2, "close": 13.31, "high": 13.31,
+             "low": 12.1, "volume": 1, "pct": 10.0},
+            {"date": "2026-09-04", "open": 13.5, "close": 13.4, "high": 13.6,
+             "low": 13.2, "volume": 1, "pct": 1.2},
+            {"date": "2026-09-07", "open": 13.3, "close": 13.0, "high": 13.4,
+             "low": 12.9, "volume": 1, "pct": -0.4},
+        ]
+        results, _, n_detected = scan_stock_events("600000", bars, 2026, 2026)
+        self.assertEqual(n_detected, 3)
+        streaks = sorted(r["streak"] for r in results)
+        self.assertEqual(streaks, [1, 2, 3])  # 连板数依次1/2/3
 
     def test_gap_filter_rejects_one_word_board(self):
         from backtest import simulate_event
@@ -399,11 +497,11 @@ class TestBacktest(unittest.TestCase):
             {"date": "2026-09-02", "open": 11.0, "close": 11.0, "high": 11.0,
              "low": 11.0, "volume": 1, "pct": 10.0},
         ] + self._bars()[2:]
-        self.assertIsNone(simulate_event("600000", bars, 0, self._costs()))
+        self.assertIsNone(simulate_event("600000", bars, 0))
 
     def test_normal_event_with_costs(self):
         from backtest import simulate_event
-        r = simulate_event("600000", self._bars(), 0, self._costs())
+        r = simulate_event("600000", self._bars(), 0)
         self.assertIsNotNone(r)
         self.assertEqual(r["reason"], "收盘卖出")
         # 买入 10.3*1.003=10.33，卖出10.4：毛利0.7%被最低佣金吞掉大半
@@ -417,10 +515,21 @@ class TestBacktest(unittest.TestCase):
         # D+2 盘中砸到-5%以下
         bars[2] = {"date": "2026-09-03", "open": 10.4, "close": 9.9, "high": 10.4,
                    "low": 9.5, "volume": 1, "pct": -4.8}
-        r = simulate_event("600000", bars, 0, self._costs())
+        r = simulate_event("600000", bars, 0)
         self.assertEqual(r["reason"], "止损")
         # 止损价 = 10.33 * 0.95 ≈ 9.81
         self.assertAlmostEqual(r["sell_price"], 9.81, places=1)
+
+    def test_stop_loss_gap_down_fills_at_open(self):
+        """D+2跳空低开低于止损价：真实成交价是开盘价而非止损价"""
+        from backtest import simulate_event
+        bars = self._bars()
+        bars[2] = {"date": "2026-09-03", "open": 9.5, "close": 9.6, "high": 9.7,
+                   "low": 9.4, "volume": 1, "pct": -7.7}
+        r = simulate_event("600000", bars, 0)
+        self.assertEqual(r["reason"], "止损")
+        # 开盘9.5 < 止损价9.81 → 按开盘价成交
+        self.assertEqual(r["sell_price"], 9.5)
 
     def test_limit_up_hold(self):
         from backtest import simulate_event
@@ -428,7 +537,7 @@ class TestBacktest(unittest.TestCase):
         # D+2 收盘涨停 → 续持到 D+3
         bars[2] = {"date": "2026-09-03", "open": 10.4, "close": 11.44, "high": 11.44,
                    "low": 10.3, "volume": 1, "pct": 10.0}
-        r = simulate_event("600000", bars, 0, self._costs())
+        r = simulate_event("600000", bars, 0)
         self.assertEqual(r["days"], 2)
         self.assertEqual(r["sell_price"], 10.2)  # D+3 收盘
 
@@ -440,7 +549,23 @@ class TestBacktest(unittest.TestCase):
             {"date": "2026-09-02", "open": 20.4, "close": 20.5, "high": 20.6,
              "low": 20.2, "volume": 1, "pct": 2.5},
         ] + self._bars()[2:]
-        self.assertIsNone(simulate_event("600000", bars, 0, self._costs()))
+        self.assertIsNone(simulate_event("600000", bars, 0))
+
+    def test_circuit_breaker_trips(self):
+        """熔断器：失败率过半即跳闸（昨天的教训——限流下不磨十小时）"""
+        from backtest import _CircuitBreaker
+        cb = _CircuitBreaker(window=100, threshold=0.5)
+        for _ in range(30):
+            cb.record(True)
+        self.assertIsNone(cb.tripped())
+        for _ in range(30):
+            cb.record(False)
+        # 60次里30次失败=50%，未超熔断线（阈值是">"）
+        self.assertIsNone(cb.tripped())
+        for _ in range(10):
+            cb.record(False)
+        # 70次里40次失败≈57% > 50%
+        self.assertIsNotNone(cb.tripped())
 
 
 if __name__ == "__main__":
