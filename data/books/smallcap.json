@@ -1,0 +1,14 @@
+{
+ "cash": 1000,
+ "positions": [],
+ "initial_capital": 1000,
+ "total_costs": 0.0,
+ "pending_trades": [],
+ "rebalance_state": {},
+ "nav_history": [
+  {
+   "date": "2026-09-07",
+   "value": 1000
+  }
+ ]
+}

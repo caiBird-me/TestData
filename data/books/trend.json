@@ -1,0 +1,22 @@
+{
+ "cash": 1000,
+ "positions": [],
+ "initial_capital": 1000,
+ "total_costs": 0.0,
+ "pending_trades": [
+  {
+   "action": "buy",
+   "code": "510880",
+   "name": "红利ETF",
+   "slot": false,
+   "date": "2026-09-07"
+  }
+ ],
+ "rebalance_state": {},
+ "nav_history": [
+  {
+   "date": "2026-09-07",
+   "value": 1000
+  }
+ ]
+}

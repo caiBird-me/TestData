@@ -1,0 +1,1959 @@
+{
+ "date": "20260907",
+ "limit_up": [
+  {
+   "code": "920821",
+   "name": "则成电子",
+   "pct": 29.97,
+   "price": 23.59,
+   "board": "元件",
+   "turnover": 20.3
+  },
+  {
+   "code": "300112",
+   "name": "万讯自控",
+   "pct": 20.02,
+   "price": 10.55,
+   "board": "通用设备",
+   "turnover": 15.58
+  },
+  {
+   "code": "688655",
+   "name": "迅捷兴",
+   "pct": 20.0,
+   "price": 50.52,
+   "board": "元件",
+   "turnover": 9.48
+  },
+  {
+   "code": "688001",
+   "name": "华兴源创",
+   "pct": 20.0,
+   "price": 58.26,
+   "board": "通用设备",
+   "turnover": 4.05
+  },
+  {
+   "code": "301516",
+   "name": "中远通",
+   "pct": 20.0,
+   "price": 19.98,
+   "board": "其他电源设备Ⅱ",
+   "turnover": 41.87
+  },
+  {
+   "code": "688813",
+   "name": "泰金新能",
+   "pct": 20.0,
+   "price": 122.77,
+   "board": "专用设备",
+   "turnover": 28.21
+  },
+  {
+   "code": "301550",
+   "name": "斯菱智驱",
+   "pct": 20.0,
+   "price": 97.75,
+   "board": "汽车零部件",
+   "turnover": 7.95
+  },
+  {
+   "code": "000078",
+   "name": "ST海王",
+   "pct": 10.34,
+   "price": 1.6,
+   "board": "医药商业",
+   "turnover": 6.23
+  },
+  {
+   "code": "000816",
+   "name": "智慧农业",
+   "pct": 10.17,
+   "price": 3.25,
+   "board": "汽车零部件",
+   "turnover": 7.7
+  },
+  {
+   "code": "600103",
+   "name": "青山纸业",
+   "pct": 10.14,
+   "price": 3.91,
+   "board": "造纸",
+   "turnover": 22.16
+  },
+  {
+   "code": "600400",
+   "name": "红豆股份",
+   "pct": 10.14,
+   "price": 3.15,
+   "board": "服装家纺",
+   "turnover": 2.68
+  },
+  {
+   "code": "600108",
+   "name": "亚盛集团",
+   "pct": 10.09,
+   "price": 4.8,
+   "board": "种植业",
+   "turnover": 1.05
+  },
+  {
+   "code": "000759",
+   "name": "中百集团",
+   "pct": 10.06,
+   "price": 7.0,
+   "board": "一般零售",
+   "turnover": 18.92
+  },
+  {
+   "code": "002483",
+   "name": "润邦股份",
+   "pct": 10.05,
+   "price": 6.02,
+   "board": "专用设备",
+   "turnover": 5.46
+  },
+  {
+   "code": "001330",
+   "name": "博纳影业",
+   "pct": 10.05,
+   "price": 6.35,
+   "board": "影视院线",
+   "turnover": 18.58
+  },
+  {
+   "code": "002470",
+   "name": "金正大",
+   "pct": 10.05,
+   "price": 2.3,
+   "board": "农化制品",
+   "turnover": 10.54
+  },
+  {
+   "code": "600354",
+   "name": "敦煌种业",
+   "pct": 10.05,
+   "price": 9.53,
+   "board": "种植业",
+   "turnover": 11.34
+  },
+  {
+   "code": "002011",
+   "name": "盾安环境",
+   "pct": 10.05,
+   "price": 11.94,
+   "board": "家电零部件Ⅱ",
+   "turnover": 7.77
+  },
+  {
+   "code": "600865",
+   "name": "百大集团",
+   "pct": 10.04,
+   "price": 12.49,
+   "board": "一般零售",
+   "turnover": 4.65
+  },
+  {
+   "code": "603628",
+   "name": "清源股份",
+   "pct": 10.04,
+   "price": 10.85,
+   "board": "光伏设备",
+   "turnover": 6.59
+  },
+  {
+   "code": "601086",
+   "name": "国芳集团",
+   "pct": 10.04,
+   "price": 13.92,
+   "board": "一般零售",
+   "turnover": 8.78
+  },
+  {
+   "code": "600770",
+   "name": "综艺股份",
+   "pct": 10.04,
+   "price": 5.59,
+   "board": "综合Ⅱ",
+   "turnover": 3.11
+  },
+  {
+   "code": "002815",
+   "name": "崇达技术",
+   "pct": 10.03,
+   "price": 16.01,
+   "board": "元件",
+   "turnover": 10.05
+  },
+  {
+   "code": "605577",
+   "name": "龙版传媒",
+   "pct": 10.03,
+   "price": 17.11,
+   "board": "出版",
+   "turnover": 3.23
+  },
+  {
+   "code": "002972",
+   "name": "科安达",
+   "pct": 10.03,
+   "price": 13.93,
+   "board": "轨交设备Ⅱ",
+   "turnover": 10.49
+  },
+  {
+   "code": "001366",
+   "name": "播恩集团",
+   "pct": 10.03,
+   "price": 15.8,
+   "board": "饲料",
+   "turnover": 3.43
+  },
+  {
+   "code": "600791",
+   "name": "京能置业",
+   "pct": 10.03,
+   "price": 8.01,
+   "board": "房地产开发",
+   "turnover": 5.0
+  },
+  {
+   "code": "601595",
+   "name": "上海电影",
+   "pct": 10.03,
+   "price": 20.63,
+   "board": "影视院线",
+   "turnover": 4.51
+  },
+  {
+   "code": "603118",
+   "name": "共进股份",
+   "pct": 10.02,
+   "price": 17.89,
+   "board": "通信设备",
+   "turnover": 4.54
+  },
+  {
+   "code": "603608",
+   "name": "天创时尚",
+   "pct": 10.02,
+   "price": 23.05,
+   "board": "服装家纺",
+   "turnover": 5.04
+  },
+  {
+   "code": "000428",
+   "name": "华天酒店",
+   "pct": 10.02,
+   "price": 5.16,
+   "board": "酒店餐饮",
+   "turnover": 9.19
+  },
+  {
+   "code": "002708",
+   "name": "光洋股份",
+   "pct": 10.02,
+   "price": 16.8,
+   "board": "汽车零部件",
+   "turnover": 11.09
+  },
+  {
+   "code": "002988",
+   "name": "豪美新材",
+   "pct": 10.02,
+   "price": 28.77,
+   "board": "工业金属",
+   "turnover": 5.75
+  },
+  {
+   "code": "002403",
+   "name": "爱仕达",
+   "pct": 10.02,
+   "price": 12.41,
+   "board": "小家电",
+   "turnover": 13.38
+  },
+  {
+   "code": "600330",
+   "name": "天通股份",
+   "pct": 10.02,
+   "price": 28.89,
+   "board": "电子化学品Ⅱ",
+   "turnover": 6.29
+  },
+  {
+   "code": "603395",
+   "name": "红四方",
+   "pct": 10.01,
+   "price": 29.77,
+   "board": "农化制品",
+   "turnover": 28.77
+  },
+  {
+   "code": "001229",
+   "name": "魅视科技",
+   "pct": 10.01,
+   "price": 38.89,
+   "board": "计算机设备",
+   "turnover": 6.49
+  },
+  {
+   "code": "605580",
+   "name": "恒盛能源",
+   "pct": 10.01,
+   "price": 24.72,
+   "board": "电力",
+   "turnover": 11.81
+  },
+  {
+   "code": "603936",
+   "name": "博敏电子",
+   "pct": 10.01,
+   "price": 17.58,
+   "board": "元件",
+   "turnover": 7.87
+  },
+  {
+   "code": "603286",
+   "name": "日盈电子",
+   "pct": 10.01,
+   "price": 47.36,
+   "board": "汽车零部件",
+   "turnover": 5.66
+  },
+  {
+   "code": "603119",
+   "name": "浙江荣泰",
+   "pct": 10.01,
+   "price": 51.65,
+   "board": "汽车零部件",
+   "turnover": 2.64
+  },
+  {
+   "code": "600857",
+   "name": "宁波中百",
+   "pct": 10.01,
+   "price": 22.86,
+   "board": "一般零售",
+   "turnover": 8.26
+  },
+  {
+   "code": "603823",
+   "name": "百合花",
+   "pct": 10.01,
+   "price": 58.04,
+   "board": "化学制品",
+   "turnover": 3.24
+  },
+  {
+   "code": "000823",
+   "name": "超声电子",
+   "pct": 10.01,
+   "price": 15.94,
+   "board": "元件",
+   "turnover": 8.82
+  },
+  {
+   "code": "002290",
+   "name": "禾盛新材",
+   "pct": 10.01,
+   "price": 68.05,
+   "board": "家电零部件Ⅱ",
+   "turnover": 4.49
+  },
+  {
+   "code": "603192",
+   "name": "汇得科技",
+   "pct": 10.01,
+   "price": 20.89,
+   "board": "化学制品",
+   "turnover": 2.66
+  },
+  {
+   "code": "002980",
+   "name": "华盛昌",
+   "pct": 10.0,
+   "price": 118.1,
+   "board": "电网设备",
+   "turnover": 10.99
+  },
+  {
+   "code": "001267",
+   "name": "汇绿生态",
+   "pct": 10.0,
+   "price": 38.71,
+   "board": "通信设备",
+   "turnover": 6.63
+  },
+  {
+   "code": "002138",
+   "name": "顺络电子",
+   "pct": 10.0,
+   "price": 48.94,
+   "board": "元件",
+   "turnover": 5.39
+  },
+  {
+   "code": "600345",
+   "name": "长江通信",
+   "pct": 10.0,
+   "price": 51.25,
+   "board": "通信设备",
+   "turnover": 6.95
+  },
+  {
+   "code": "603186",
+   "name": "华正新材",
+   "pct": 10.0,
+   "price": 186.09,
+   "board": "元件",
+   "turnover": 12.95
+  },
+  {
+   "code": "603083",
+   "name": "剑桥科技",
+   "pct": 10.0,
+   "price": 207.21,
+   "board": "通信设备",
+   "turnover": 6.13
+  },
+  {
+   "code": "603826",
+   "name": "坤彩科技",
+   "pct": 10.0,
+   "price": 17.38,
+   "board": "非金属材料Ⅱ",
+   "turnover": 0.76
+  },
+  {
+   "code": "603311",
+   "name": "金海高科",
+   "pct": 10.0,
+   "price": 29.37,
+   "board": "家电零部件Ⅱ",
+   "turnover": 1.96
+  },
+  {
+   "code": "603009",
+   "name": "北特科技",
+   "pct": 10.0,
+   "price": 48.84,
+   "board": "汽车零部件",
+   "turnover": 4.06
+  },
+  {
+   "code": "600785",
+   "name": "新华百货",
+   "pct": 10.0,
+   "price": 12.54,
+   "board": "一般零售",
+   "turnover": 23.47
+  },
+  {
+   "code": "600127",
+   "name": "金健米业",
+   "pct": 10.0,
+   "price": 13.53,
+   "board": "农产品加工",
+   "turnover": 21.28
+  },
+  {
+   "code": "002957",
+   "name": "科瑞技术",
+   "pct": 10.0,
+   "price": 40.92,
+   "board": "自动化设备",
+   "turnover": 4.78
+  },
+  {
+   "code": "002916",
+   "name": "深南电路",
+   "pct": 10.0,
+   "price": 364.98,
+   "board": "元件",
+   "turnover": 1.38
+  },
+  {
+   "code": "002579",
+   "name": "中京电子",
+   "pct": 10.0,
+   "price": 15.51,
+   "board": "元件",
+   "turnover": 16.14
+  },
+  {
+   "code": "002281",
+   "name": "光迅科技",
+   "pct": 10.0,
+   "price": 184.47,
+   "board": "通信设备",
+   "turnover": 5.31
+  },
+  {
+   "code": "001296",
+   "name": "长江材料",
+   "pct": 10.0,
+   "price": 22.0,
+   "board": "非金属材料Ⅱ",
+   "turnover": 6.85
+  },
+  {
+   "code": "603124",
+   "name": "江南新材",
+   "pct": 10.0,
+   "price": 131.13,
+   "board": "金属新材料",
+   "turnover": 11.35
+  },
+  {
+   "code": "001389",
+   "name": "广合科技",
+   "pct": 10.0,
+   "price": 167.88,
+   "board": "元件",
+   "turnover": 5.5
+  },
+  {
+   "code": "002436",
+   "name": "兴森科技",
+   "pct": 10.0,
+   "price": 36.75,
+   "board": "元件",
+   "turnover": 7.12
+  },
+  {
+   "code": "002975",
+   "name": "博杰股份",
+   "pct": 10.0,
+   "price": 104.53,
+   "board": "自动化设备",
+   "turnover": 11.75
+  },
+  {
+   "code": "002484",
+   "name": "江海股份",
+   "pct": 10.0,
+   "price": 61.95,
+   "board": "元件",
+   "turnover": 7.21
+  },
+  {
+   "code": "002902",
+   "name": "铭普光磁",
+   "pct": 10.0,
+   "price": 27.18,
+   "board": "通信设备",
+   "turnover": 9.13
+  },
+  {
+   "code": "603228",
+   "name": "景旺电子",
+   "pct": 10.0,
+   "price": 105.97,
+   "board": "元件",
+   "turnover": 5.12
+  },
+  {
+   "code": "605168",
+   "name": "三人行",
+   "pct": 10.0,
+   "price": 52.49,
+   "board": "广告营销",
+   "turnover": 4.54
+  },
+  {
+   "code": "603679",
+   "name": "华体科技",
+   "pct": 10.0,
+   "price": 23.77,
+   "board": "光学光电子",
+   "turnover": 6.19
+  },
+  {
+   "code": "603926",
+   "name": "铁流股份",
+   "pct": 9.99,
+   "price": 18.6,
+   "board": "汽车零部件",
+   "turnover": 4.7
+  },
+  {
+   "code": "002881",
+   "name": "美格智能",
+   "pct": 9.99,
+   "price": 46.12,
+   "board": "通信设备",
+   "turnover": 1.61
+  },
+  {
+   "code": "605488",
+   "name": "福莱新材",
+   "pct": 9.99,
+   "price": 29.94,
+   "board": "塑料",
+   "turnover": 3.89
+  },
+  {
+   "code": "002852",
+   "name": "道道全",
+   "pct": 9.99,
+   "price": 9.36,
+   "board": "农产品加工",
+   "turnover": 5.37
+  },
+  {
+   "code": "002909",
+   "name": "集泰股份",
+   "pct": 9.99,
+   "price": 7.93,
+   "board": "化学制品",
+   "turnover": 27.34
+  },
+  {
+   "code": "603355",
+   "name": "莱克电气",
+   "pct": 9.99,
+   "price": 30.07,
+   "board": "小家电",
+   "turnover": 1.06
+  },
+  {
+   "code": "600540",
+   "name": "新赛股份",
+   "pct": 9.98,
+   "price": 6.72,
+   "board": "种植业",
+   "turnover": 31.56
+  },
+  {
+   "code": "603626",
+   "name": "科森科技",
+   "pct": 9.98,
+   "price": 19.72,
+   "board": "消费电子",
+   "turnover": 5.45
+  },
+  {
+   "code": "002702",
+   "name": "海欣食品",
+   "pct": 9.98,
+   "price": 6.17,
+   "board": "食品加工",
+   "turnover": 2.01
+  },
+  {
+   "code": "002516",
+   "name": "旷达科技",
+   "pct": 9.98,
+   "price": 5.95,
+   "board": "汽车零部件",
+   "turnover": 4.75
+  },
+  {
+   "code": "603696",
+   "name": "安记食品",
+   "pct": 9.98,
+   "price": 16.64,
+   "board": "调味发酵品Ⅱ",
+   "turnover": 6.51
+  },
+  {
+   "code": "002963",
+   "name": "豪尔赛",
+   "pct": 9.98,
+   "price": 22.15,
+   "board": "装修装饰Ⅱ",
+   "turnover": 8.37
+  },
+  {
+   "code": "603042",
+   "name": "华脉科技",
+   "pct": 9.98,
+   "price": 15.43,
+   "board": "通信设备",
+   "turnover": 5.18
+  },
+  {
+   "code": "002172",
+   "name": "澳洋健康",
+   "pct": 9.98,
+   "price": 4.63,
+   "board": "医疗服务",
+   "turnover": 15.55
+  },
+  {
+   "code": "603668",
+   "name": "天马科技",
+   "pct": 9.97,
+   "price": 13.12,
+   "board": "饲料",
+   "turnover": 5.62
+  },
+  {
+   "code": "002515",
+   "name": "金字火腿",
+   "pct": 9.97,
+   "price": 8.16,
+   "board": "食品加工",
+   "turnover": 15.53
+  },
+  {
+   "code": "000978",
+   "name": "桂林旅游",
+   "pct": 9.97,
+   "price": 7.28,
+   "board": "旅游及景区",
+   "turnover": 12.55
+  },
+  {
+   "code": "000798",
+   "name": "中水渔业",
+   "pct": 9.96,
+   "price": 11.15,
+   "board": "渔业",
+   "turnover": 6.61
+  },
+  {
+   "code": "000735",
+   "name": "罗 牛 山",
+   "pct": 9.95,
+   "price": 6.74,
+   "board": "养殖业",
+   "turnover": 4.26
+  },
+  {
+   "code": "603999",
+   "name": "读者传媒",
+   "pct": 9.95,
+   "price": 6.63,
+   "board": "出版",
+   "turnover": 3.6
+  },
+  {
+   "code": "601949",
+   "name": "中国出版",
+   "pct": 9.95,
+   "price": 6.41,
+   "board": "出版",
+   "turnover": 6.73
+  },
+  {
+   "code": "002564",
+   "name": "天沃科技",
+   "pct": 9.94,
+   "price": 5.42,
+   "board": "专用设备",
+   "turnover": 3.95
+  },
+  {
+   "code": "600280",
+   "name": "中央商场",
+   "pct": 9.94,
+   "price": 3.43,
+   "board": "一般零售",
+   "turnover": 3.46
+  }
+ ],
+ "top": [
+  {
+   "code": "603448",
+   "name": "N天博",
+   "pct": 42.71,
+   "board": "汽车零部件",
+   "turnover": 58.55,
+   "vol_ratio": 0.0,
+   "main_inflow": 325403981.0,
+   "price": 89.41,
+   "high": 110.11,
+   "pre_close": 62.65
+  },
+  {
+   "code": "920269",
+   "name": "N杰锋",
+   "pct": 36.78,
+   "board": "汽车零部件",
+   "turnover": 83.64,
+   "vol_ratio": 0.0,
+   "main_inflow": 1637108.0,
+   "price": 41.99,
+   "high": 48.86,
+   "pre_close": 30.7
+  },
+  {
+   "code": "920821",
+   "name": "则成电子",
+   "pct": 29.97,
+   "board": "元件",
+   "turnover": 20.3,
+   "vol_ratio": 5.29,
+   "main_inflow": 149140997.0,
+   "price": 23.59,
+   "high": 23.59,
+   "pre_close": 18.15
+  },
+  {
+   "code": "300112",
+   "name": "万讯自控",
+   "pct": 20.02,
+   "board": "通用设备",
+   "turnover": 15.58,
+   "vol_ratio": 1.83,
+   "main_inflow": 29921680.0,
+   "price": 10.55,
+   "high": 10.55,
+   "pre_close": 8.79
+  },
+  {
+   "code": "688655",
+   "name": "迅捷兴",
+   "pct": 20.0,
+   "board": "元件",
+   "turnover": 9.48,
+   "vol_ratio": 1.5,
+   "main_inflow": 82871922.0,
+   "price": 50.52,
+   "high": 50.52,
+   "pre_close": 42.1
+  },
+  {
+   "code": "688001",
+   "name": "华兴源创",
+   "pct": 20.0,
+   "board": "通用设备",
+   "turnover": 4.05,
+   "vol_ratio": 2.73,
+   "main_inflow": 32458000.0,
+   "price": 58.26,
+   "high": 58.26,
+   "pre_close": 48.55
+  },
+  {
+   "code": "301516",
+   "name": "中远通",
+   "pct": 20.0,
+   "board": "其他电源设备Ⅱ",
+   "turnover": 41.87,
+   "vol_ratio": 3.48,
+   "main_inflow": 114440511.0,
+   "price": 19.98,
+   "high": 19.98,
+   "pre_close": 16.65
+  },
+  {
+   "code": "688813",
+   "name": "泰金新能",
+   "pct": 20.0,
+   "board": "专用设备",
+   "turnover": 28.21,
+   "vol_ratio": 3.01,
+   "main_inflow": 48168019.0,
+   "price": 122.77,
+   "high": 122.77,
+   "pre_close": 102.31
+  },
+  {
+   "code": "301550",
+   "name": "斯菱智驱",
+   "pct": 20.0,
+   "board": "汽车零部件",
+   "turnover": 7.95,
+   "vol_ratio": 2.34,
+   "main_inflow": 237929469.0,
+   "price": 97.75,
+   "high": 97.75,
+   "pre_close": 81.46
+  },
+  {
+   "code": "301595",
+   "name": "太力科技",
+   "pct": 18.17,
+   "board": "家居用品",
+   "turnover": 10.71,
+   "vol_ratio": 6.71,
+   "main_inflow": 29221157.0,
+   "price": 43.71,
+   "high": 44.39,
+   "pre_close": 36.99
+  },
+  {
+   "code": "300684",
+   "name": "中石科技",
+   "pct": 17.83,
+   "board": "电子化学品Ⅱ",
+   "turnover": 18.83,
+   "vol_ratio": 1.75,
+   "main_inflow": 239574864.0,
+   "price": 104.75,
+   "high": 106.68,
+   "pre_close": 88.9
+  },
+  {
+   "code": "920045",
+   "name": "蘅东光",
+   "pct": 17.68,
+   "board": "通信设备",
+   "turnover": 7.49,
+   "vol_ratio": 1.63,
+   "main_inflow": 248665308.0,
+   "price": 544.03,
+   "high": 555.1,
+   "pre_close": 462.3
+  },
+  {
+   "code": "301529",
+   "name": "福赛科技",
+   "pct": 17.57,
+   "board": "汽车零部件",
+   "turnover": 9.14,
+   "vol_ratio": 2.8,
+   "main_inflow": 25574594.0,
+   "price": 125.8,
+   "high": 128.4,
+   "pre_close": 107.0
+  },
+  {
+   "code": "301511",
+   "name": "德福科技",
+   "pct": 17.08,
+   "board": "电池",
+   "turnover": 12.72,
+   "vol_ratio": 1.65,
+   "main_inflow": -36357520.0,
+   "price": 99.58,
+   "high": 101.15,
+   "pre_close": 85.05
+  },
+  {
+   "code": "300811",
+   "name": "铂科新材",
+   "pct": 15.9,
+   "board": "金属新材料",
+   "turnover": 6.29,
+   "vol_ratio": 2.73,
+   "main_inflow": 41616368.0,
+   "price": 83.98,
+   "high": 84.3,
+   "pre_close": 72.46
+  },
+  {
+   "code": "688498",
+   "name": "源杰科技",
+   "pct": 15.62,
+   "board": "半导体",
+   "turnover": 4.12,
+   "vol_ratio": 2.21,
+   "main_inflow": 76129680.0,
+   "price": 1694.99,
+   "high": 1697.23,
+   "pre_close": 1466.0
+  },
+  {
+   "code": "688678",
+   "name": "福立旺",
+   "pct": 15.37,
+   "board": "消费电子",
+   "turnover": 9.31,
+   "vol_ratio": 2.86,
+   "main_inflow": -109193116.0,
+   "price": 23.04,
+   "high": 23.28,
+   "pre_close": 19.97
+  },
+  {
+   "code": "688700",
+   "name": "东威科技",
+   "pct": 15.2,
+   "board": "专用设备",
+   "turnover": 8.08,
+   "vol_ratio": 2.39,
+   "main_inflow": -26016073.0,
+   "price": 61.91,
+   "high": 62.89,
+   "pre_close": 53.74
+  },
+  {
+   "code": "301312",
+   "name": "智立方",
+   "pct": 14.98,
+   "board": "自动化设备",
+   "turnover": 10.34,
+   "vol_ratio": 1.96,
+   "main_inflow": 7837305.0,
+   "price": 86.91,
+   "high": 87.0,
+   "pre_close": 75.59
+  },
+  {
+   "code": "300488",
+   "name": "恒锋工具",
+   "pct": 14.51,
+   "board": "通用设备",
+   "turnover": 7.61,
+   "vol_ratio": 3.84,
+   "main_inflow": 47341577.0,
+   "price": 35.75,
+   "high": 36.78,
+   "pre_close": 31.22
+  },
+  {
+   "code": "300570",
+   "name": "太辰光",
+   "pct": 14.24,
+   "board": "通信设备",
+   "turnover": 10.74,
+   "vol_ratio": 1.98,
+   "main_inflow": 473340064.0,
+   "price": 205.63,
+   "high": 207.68,
+   "pre_close": 180.0
+  },
+  {
+   "code": "301183",
+   "name": "东田微",
+   "pct": 14.22,
+   "board": "光学光电子",
+   "turnover": 10.23,
+   "vol_ratio": 2.51,
+   "main_inflow": 89187785.0,
+   "price": 242.31,
+   "high": 246.98,
+   "pre_close": 212.14
+  },
+  {
+   "code": "300461",
+   "name": "田中精机",
+   "pct": 13.81,
+   "board": "自动化设备",
+   "turnover": 8.02,
+   "vol_ratio": 3.16,
+   "main_inflow": -2173831.0,
+   "price": 34.52,
+   "high": 35.6,
+   "pre_close": 30.33
+  },
+  {
+   "code": "688677",
+   "name": "海泰新光",
+   "pct": 13.57,
+   "board": "医疗器械",
+   "turnover": 11.03,
+   "vol_ratio": 1.76,
+   "main_inflow": -73586364.0,
+   "price": 92.91,
+   "high": 93.5,
+   "pre_close": 81.81
+  },
+  {
+   "code": "301419",
+   "name": "阿莱德",
+   "pct": 13.5,
+   "board": "通信设备",
+   "turnover": 9.71,
+   "vol_ratio": 1.68,
+   "main_inflow": 25053126.0,
+   "price": 40.52,
+   "high": 41.4,
+   "pre_close": 35.7
+  },
+  {
+   "code": "301486",
+   "name": "致尚科技",
+   "pct": 13.24,
+   "board": "消费电子",
+   "turnover": 15.07,
+   "vol_ratio": 2.24,
+   "main_inflow": 151575872.0,
+   "price": 194.41,
+   "high": 197.5,
+   "pre_close": 171.68
+  },
+  {
+   "code": "688435",
+   "name": "英方软件",
+   "pct": 13.18,
+   "board": "软件开发",
+   "turnover": 19.26,
+   "vol_ratio": 4.3,
+   "main_inflow": 38944843.0,
+   "price": 37.27,
+   "high": 39.5,
+   "pre_close": 32.93
+  },
+  {
+   "code": "301046",
+   "name": "能辉科技",
+   "pct": 13.14,
+   "board": "专业工程",
+   "turnover": 10.55,
+   "vol_ratio": 2.12,
+   "main_inflow": -24995052.0,
+   "price": 31.0,
+   "high": 31.29,
+   "pre_close": 27.4
+  },
+  {
+   "code": "301196",
+   "name": "唯科科技",
+   "pct": 12.47,
+   "board": "塑料",
+   "turnover": 7.82,
+   "vol_ratio": 1.55,
+   "main_inflow": -13175561.0,
+   "price": 88.72,
+   "high": 90.45,
+   "pre_close": 78.88
+  },
+  {
+   "code": "688656",
+   "name": "浩欧博",
+   "pct": 12.41,
+   "board": "医疗器械",
+   "turnover": 2.18,
+   "vol_ratio": 1.63,
+   "main_inflow": -4235518.0,
+   "price": 117.45,
+   "high": 117.74,
+   "pre_close": 104.48
+  },
+  {
+   "code": "688583",
+   "name": "思看科技",
+   "pct": 12.39,
+   "board": "通用设备",
+   "turnover": 19.66,
+   "vol_ratio": 5.0,
+   "main_inflow": 67446817.0,
+   "price": 90.25,
+   "high": 96.36,
+   "pre_close": 80.3
+  },
+  {
+   "code": "688312",
+   "name": "燕麦科技",
+   "pct": 12.17,
+   "board": "专用设备",
+   "turnover": 6.25,
+   "vol_ratio": 2.11,
+   "main_inflow": -2035999.0,
+   "price": 50.25,
+   "high": 50.9,
+   "pre_close": 44.8
+  },
+  {
+   "code": "688025",
+   "name": "杰普特",
+   "pct": 12.1,
+   "board": "自动化设备",
+   "turnover": 3.83,
+   "vol_ratio": 1.68,
+   "main_inflow": 140920837.0,
+   "price": 404.99,
+   "high": 408.76,
+   "pre_close": 361.29
+  },
+  {
+   "code": "300835",
+   "name": "龙磁科技",
+   "pct": 11.7,
+   "board": "金属新材料",
+   "turnover": 6.34,
+   "vol_ratio": 2.44,
+   "main_inflow": 11692886.0,
+   "price": 172.24,
+   "high": 172.28,
+   "pre_close": 154.2
+  },
+  {
+   "code": "301067",
+   "name": "显盈科技",
+   "pct": 11.52,
+   "board": "消费电子",
+   "turnover": 6.93,
+   "vol_ratio": 1.41,
+   "main_inflow": -8352744.0,
+   "price": 31.57,
+   "high": 31.58,
+   "pre_close": 28.31
+  },
+  {
+   "code": "300938",
+   "name": "信测标准",
+   "pct": 11.29,
+   "board": "专业服务",
+   "turnover": 4.63,
+   "vol_ratio": 2.33,
+   "main_inflow": 32782261.0,
+   "price": 29.09,
+   "high": 29.19,
+   "pre_close": 26.14
+  },
+  {
+   "code": "688627",
+   "name": "精智达",
+   "pct": 11.22,
+   "board": "通用设备",
+   "turnover": 6.74,
+   "vol_ratio": 1.3,
+   "main_inflow": -191237440.0,
+   "price": 491.14,
+   "high": 494.07,
+   "pre_close": 441.58
+  },
+  {
+   "code": "300153",
+   "name": "科泰电源",
+   "pct": 11.22,
+   "board": "其他电源设备Ⅱ",
+   "turnover": 10.85,
+   "vol_ratio": 4.86,
+   "main_inflow": 69736947.0,
+   "price": 25.38,
+   "high": 25.98,
+   "pre_close": 22.82
+  },
+  {
+   "code": "301205",
+   "name": "联特科技",
+   "pct": 11.18,
+   "board": "通信设备",
+   "turnover": 10.5,
+   "vol_ratio": 1.77,
+   "main_inflow": 36858176.0,
+   "price": 316.85,
+   "high": 320.98,
+   "pre_close": 285.0
+  },
+  {
+   "code": "300901",
+   "name": "中胤时尚",
+   "pct": 11.07,
+   "board": "服装家纺",
+   "turnover": 4.89,
+   "vol_ratio": 1.28,
+   "main_inflow": 17463125.0,
+   "price": 21.37,
+   "high": 21.86,
+   "pre_close": 19.24
+  },
+  {
+   "code": "920178",
+   "name": "锐翔智能",
+   "pct": 10.9,
+   "board": "自动化设备",
+   "turnover": 9.65,
+   "vol_ratio": 2.54,
+   "main_inflow": 17701306.0,
+   "price": 95.75,
+   "high": 98.8,
+   "pre_close": 86.34
+  },
+  {
+   "code": "688183",
+   "name": "生益电子",
+   "pct": 10.82,
+   "board": "元件",
+   "turnover": 2.61,
+   "vol_ratio": 1.34,
+   "main_inflow": 258407632.0,
+   "price": 131.25,
+   "high": 132.37,
+   "pre_close": 118.43
+  },
+  {
+   "code": "300739",
+   "name": "明阳电路",
+   "pct": 10.82,
+   "board": "元件",
+   "turnover": 5.85,
+   "vol_ratio": 2.99,
+   "main_inflow": 18462537.0,
+   "price": 24.59,
+   "high": 24.77,
+   "pre_close": 22.19
+  },
+  {
+   "code": "688630",
+   "name": "芯碁微装",
+   "pct": 10.57,
+   "board": "专用设备",
+   "turnover": 3.5,
+   "vol_ratio": 1.48,
+   "main_inflow": 98999915.0,
+   "price": 409.98,
+   "high": 411.88,
+   "pre_close": 370.8
+  },
+  {
+   "code": "300548",
+   "name": "长芯博创",
+   "pct": 10.56,
+   "board": "通信设备",
+   "turnover": 5.38,
+   "vol_ratio": 1.75,
+   "main_inflow": -32712432.0,
+   "price": 214.25,
+   "high": 215.37,
+   "pre_close": 193.78
+  },
+  {
+   "code": "300632",
+   "name": "光莆股份",
+   "pct": 10.5,
+   "board": "光学光电子",
+   "turnover": 9.94,
+   "vol_ratio": 3.17,
+   "main_inflow": 25990795.0,
+   "price": 18.95,
+   "high": 19.19,
+   "pre_close": 17.15
+  },
+  {
+   "code": "300946",
+   "name": "恒而达",
+   "pct": 10.45,
+   "board": "通用设备",
+   "turnover": 4.8,
+   "vol_ratio": 5.51,
+   "main_inflow": 7672575.0,
+   "price": 40.48,
+   "high": 41.78,
+   "pre_close": 36.65
+  },
+  {
+   "code": "301225",
+   "name": "恒勃股份",
+   "pct": 10.44,
+   "board": "汽车零部件",
+   "turnover": 13.26,
+   "vol_ratio": 2.8,
+   "main_inflow": -2475712.0,
+   "price": 60.21,
+   "high": 61.6,
+   "pre_close": 54.52
+  },
+  {
+   "code": "000078",
+   "name": "ST海王",
+   "pct": 10.34,
+   "board": "医药商业",
+   "turnover": 6.23,
+   "vol_ratio": 2.66,
+   "main_inflow": 5261404.0,
+   "price": 1.6,
+   "high": 1.6,
+   "pre_close": 1.45
+  },
+  {
+   "code": "688123",
+   "name": "聚辰股份",
+   "pct": 10.29,
+   "board": "半导体",
+   "turnover": 6.75,
+   "vol_ratio": 2.25,
+   "main_inflow": -108786531.0,
+   "price": 138.15,
+   "high": 142.13,
+   "pre_close": 125.26
+  },
+  {
+   "code": "300852",
+   "name": "四会富仕",
+   "pct": 10.26,
+   "board": "元件",
+   "turnover": 8.36,
+   "vol_ratio": 1.83,
+   "main_inflow": 78833701.0,
+   "price": 53.29,
+   "high": 53.35,
+   "pre_close": 48.33
+  },
+  {
+   "code": "000816",
+   "name": "智慧农业",
+   "pct": 10.17,
+   "board": "汽车零部件",
+   "turnover": 7.7,
+   "vol_ratio": 2.57,
+   "main_inflow": 169548397.0,
+   "price": 3.25,
+   "high": 3.25,
+   "pre_close": 2.95
+  },
+  {
+   "code": "600103",
+   "name": "青山纸业",
+   "pct": 10.14,
+   "board": "造纸",
+   "turnover": 22.16,
+   "vol_ratio": 1.09,
+   "main_inflow": 589389487.0,
+   "price": 3.91,
+   "high": 3.91,
+   "pre_close": 3.55
+  },
+  {
+   "code": "600400",
+   "name": "红豆股份",
+   "pct": 10.14,
+   "board": "服装家纺",
+   "turnover": 2.68,
+   "vol_ratio": 1.96,
+   "main_inflow": 64066308.0,
+   "price": 3.15,
+   "high": 3.15,
+   "pre_close": 2.86
+  },
+  {
+   "code": "600108",
+   "name": "亚盛集团",
+   "pct": 10.09,
+   "board": "种植业",
+   "turnover": 1.05,
+   "vol_ratio": 0.1,
+   "main_inflow": 42427449.0,
+   "price": 4.8,
+   "high": 4.8,
+   "pre_close": 4.36
+  },
+  {
+   "code": "000759",
+   "name": "中百集团",
+   "pct": 10.06,
+   "board": "一般零售",
+   "turnover": 18.92,
+   "vol_ratio": 1.77,
+   "main_inflow": 297976534.0,
+   "price": 7.0,
+   "high": 7.0,
+   "pre_close": 6.36
+  },
+  {
+   "code": "002483",
+   "name": "润邦股份",
+   "pct": 10.05,
+   "board": "专用设备",
+   "turnover": 5.46,
+   "vol_ratio": 5.69,
+   "main_inflow": 75390668.0,
+   "price": 6.02,
+   "high": 6.02,
+   "pre_close": 5.47
+  },
+  {
+   "code": "001330",
+   "name": "博纳影业",
+   "pct": 10.05,
+   "board": "影视院线",
+   "turnover": 18.58,
+   "vol_ratio": 1.2,
+   "main_inflow": 288786587.0,
+   "price": 6.35,
+   "high": 6.35,
+   "pre_close": 5.77
+  },
+  {
+   "code": "002470",
+   "name": "金正大",
+   "pct": 10.05,
+   "board": "农化制品",
+   "turnover": 10.54,
+   "vol_ratio": 1.71,
+   "main_inflow": 191983611.0,
+   "price": 2.3,
+   "high": 2.3,
+   "pre_close": 2.09
+  },
+  {
+   "code": "600354",
+   "name": "敦煌种业",
+   "pct": 10.05,
+   "board": "种植业",
+   "turnover": 11.34,
+   "vol_ratio": 0.48,
+   "main_inflow": 17199042.0,
+   "price": 9.53,
+   "high": 9.53,
+   "pre_close": 8.66
+  },
+  {
+   "code": "002011",
+   "name": "盾安环境",
+   "pct": 10.05,
+   "board": "家电零部件Ⅱ",
+   "turnover": 7.77,
+   "vol_ratio": 6.57,
+   "main_inflow": 109975600.0,
+   "price": 11.94,
+   "high": 11.94,
+   "pre_close": 10.85
+  },
+  {
+   "code": "600865",
+   "name": "百大集团",
+   "pct": 10.04,
+   "board": "一般零售",
+   "turnover": 4.65,
+   "vol_ratio": 0.79,
+   "main_inflow": 96023550.0,
+   "price": 12.49,
+   "high": 12.49,
+   "pre_close": 11.35
+  },
+  {
+   "code": "603628",
+   "name": "清源股份",
+   "pct": 10.04,
+   "board": "光伏设备",
+   "turnover": 6.59,
+   "vol_ratio": 3.38,
+   "main_inflow": 54547330.0,
+   "price": 10.85,
+   "high": 10.85,
+   "pre_close": 9.86
+  },
+  {
+   "code": "601086",
+   "name": "国芳集团",
+   "pct": 10.04,
+   "board": "一般零售",
+   "turnover": 8.78,
+   "vol_ratio": 1.41,
+   "main_inflow": 153483542.0,
+   "price": 13.92,
+   "high": 13.92,
+   "pre_close": 12.65
+  },
+  {
+   "code": "600770",
+   "name": "综艺股份",
+   "pct": 10.04,
+   "board": "综合Ⅱ",
+   "turnover": 3.11,
+   "vol_ratio": 3.01,
+   "main_inflow": 90684938.0,
+   "price": 5.59,
+   "high": 5.59,
+   "pre_close": 5.08
+  },
+  {
+   "code": "002815",
+   "name": "崇达技术",
+   "pct": 10.03,
+   "board": "元件",
+   "turnover": 10.05,
+   "vol_ratio": 3.0,
+   "main_inflow": 304102364.0,
+   "price": 16.01,
+   "high": 16.01,
+   "pre_close": 14.55
+  },
+  {
+   "code": "605577",
+   "name": "龙版传媒",
+   "pct": 10.03,
+   "board": "出版",
+   "turnover": 3.23,
+   "vol_ratio": 0.59,
+   "main_inflow": 7084137.0,
+   "price": 17.11,
+   "high": 17.11,
+   "pre_close": 15.55
+  },
+  {
+   "code": "002972",
+   "name": "科安达",
+   "pct": 10.03,
+   "board": "轨交设备Ⅱ",
+   "turnover": 10.49,
+   "vol_ratio": 2.6,
+   "main_inflow": 42012611.0,
+   "price": 13.93,
+   "high": 13.93,
+   "pre_close": 12.66
+  },
+  {
+   "code": "001366",
+   "name": "播恩集团",
+   "pct": 10.03,
+   "board": "饲料",
+   "turnover": 3.43,
+   "vol_ratio": 0.59,
+   "main_inflow": 36490272.0,
+   "price": 15.8,
+   "high": 15.8,
+   "pre_close": 14.36
+  },
+  {
+   "code": "600791",
+   "name": "京能置业",
+   "pct": 10.03,
+   "board": "房地产开发",
+   "turnover": 5.0,
+   "vol_ratio": 1.15,
+   "main_inflow": 50677912.0,
+   "price": 8.01,
+   "high": 8.01,
+   "pre_close": 7.28
+  },
+  {
+   "code": "601595",
+   "name": "上海电影",
+   "pct": 10.03,
+   "board": "影视院线",
+   "turnover": 4.51,
+   "vol_ratio": 1.0,
+   "main_inflow": 106454664.0,
+   "price": 20.63,
+   "high": 20.63,
+   "pre_close": 18.75
+  },
+  {
+   "code": "603118",
+   "name": "共进股份",
+   "pct": 10.02,
+   "board": "通信设备",
+   "turnover": 4.54,
+   "vol_ratio": 0.45,
+   "main_inflow": 352218596.0,
+   "price": 17.89,
+   "high": 17.89,
+   "pre_close": 16.26
+  },
+  {
+   "code": "603608",
+   "name": "天创时尚",
+   "pct": 10.02,
+   "board": "服装家纺",
+   "turnover": 5.04,
+   "vol_ratio": 1.22,
+   "main_inflow": 40978839.0,
+   "price": 23.05,
+   "high": 23.05,
+   "pre_close": 20.95
+  },
+  {
+   "code": "000428",
+   "name": "华天酒店",
+   "pct": 10.02,
+   "board": "酒店餐饮",
+   "turnover": 9.19,
+   "vol_ratio": 1.57,
+   "main_inflow": 71517068.0,
+   "price": 5.16,
+   "high": 5.16,
+   "pre_close": 4.69
+  },
+  {
+   "code": "002708",
+   "name": "光洋股份",
+   "pct": 10.02,
+   "board": "汽车零部件",
+   "turnover": 11.09,
+   "vol_ratio": 1.13,
+   "main_inflow": 143940680.0,
+   "price": 16.8,
+   "high": 16.8,
+   "pre_close": 15.27
+  },
+  {
+   "code": "002988",
+   "name": "豪美新材",
+   "pct": 10.02,
+   "board": "工业金属",
+   "turnover": 5.75,
+   "vol_ratio": 2.32,
+   "main_inflow": 71800482.0,
+   "price": 28.77,
+   "high": 28.77,
+   "pre_close": 26.15
+  },
+  {
+   "code": "002403",
+   "name": "爱仕达",
+   "pct": 10.02,
+   "board": "小家电",
+   "turnover": 13.38,
+   "vol_ratio": 8.31,
+   "main_inflow": 102608040.0,
+   "price": 12.41,
+   "high": 12.41,
+   "pre_close": 11.28
+  },
+  {
+   "code": "600330",
+   "name": "天通股份",
+   "pct": 10.02,
+   "board": "电子化学品Ⅱ",
+   "turnover": 6.29,
+   "vol_ratio": 1.07,
+   "main_inflow": 724357952.0,
+   "price": 28.89,
+   "high": 28.89,
+   "pre_close": 26.26
+  },
+  {
+   "code": "603395",
+   "name": "红四方",
+   "pct": 10.01,
+   "board": "农化制品",
+   "turnover": 28.77,
+   "vol_ratio": 1.1,
+   "main_inflow": 171970113.0,
+   "price": 29.77,
+   "high": 29.77,
+   "pre_close": 27.06
+  },
+  {
+   "code": "001229",
+   "name": "魅视科技",
+   "pct": 10.01,
+   "board": "计算机设备",
+   "turnover": 6.49,
+   "vol_ratio": 1.55,
+   "main_inflow": 40968143.0,
+   "price": 38.89,
+   "high": 38.89,
+   "pre_close": 35.35
+  },
+  {
+   "code": "605580",
+   "name": "恒盛能源",
+   "pct": 10.01,
+   "board": "电力",
+   "turnover": 11.81,
+   "vol_ratio": 7.02,
+   "main_inflow": 23914556.0,
+   "price": 24.72,
+   "high": 24.72,
+   "pre_close": 22.47
+  },
+  {
+   "code": "603936",
+   "name": "博敏电子",
+   "pct": 10.01,
+   "board": "元件",
+   "turnover": 7.87,
+   "vol_ratio": 1.72,
+   "main_inflow": 93259496.0,
+   "price": 17.58,
+   "high": 17.58,
+   "pre_close": 15.98
+  },
+  {
+   "code": "603286",
+   "name": "日盈电子",
+   "pct": 10.01,
+   "board": "汽车零部件",
+   "turnover": 5.66,
+   "vol_ratio": 1.64,
+   "main_inflow": 38167721.0,
+   "price": 47.36,
+   "high": 47.36,
+   "pre_close": 43.05
+  },
+  {
+   "code": "603119",
+   "name": "浙江荣泰",
+   "pct": 10.01,
+   "board": "汽车零部件",
+   "turnover": 2.64,
+   "vol_ratio": 1.63,
+   "main_inflow": 123987031.0,
+   "price": 51.65,
+   "high": 51.65,
+   "pre_close": 46.95
+  },
+  {
+   "code": "600857",
+   "name": "宁波中百",
+   "pct": 10.01,
+   "board": "一般零售",
+   "turnover": 8.26,
+   "vol_ratio": 2.54,
+   "main_inflow": 38632351.0,
+   "price": 22.86,
+   "high": 22.86,
+   "pre_close": 20.78
+  },
+  {
+   "code": "603823",
+   "name": "百合花",
+   "pct": 10.01,
+   "board": "化学制品",
+   "turnover": 3.24,
+   "vol_ratio": 0.81,
+   "main_inflow": 167762778.0,
+   "price": 58.04,
+   "high": 58.04,
+   "pre_close": 52.76
+  },
+  {
+   "code": "000823",
+   "name": "超声电子",
+   "pct": 10.01,
+   "board": "元件",
+   "turnover": 8.82,
+   "vol_ratio": 1.92,
+   "main_inflow": 318092417.0,
+   "price": 15.94,
+   "high": 15.94,
+   "pre_close": 14.49
+  },
+  {
+   "code": "002290",
+   "name": "禾盛新材",
+   "pct": 10.01,
+   "board": "家电零部件Ⅱ",
+   "turnover": 4.49,
+   "vol_ratio": 2.44,
+   "main_inflow": 42833140.0,
+   "price": 68.05,
+   "high": 68.05,
+   "pre_close": 61.86
+  },
+  {
+   "code": "603192",
+   "name": "汇得科技",
+   "pct": 10.01,
+   "board": "化学制品",
+   "turnover": 2.66,
+   "vol_ratio": 1.79,
+   "main_inflow": 10633270.0,
+   "price": 20.89,
+   "high": 20.89,
+   "pre_close": 18.99
+  },
+  {
+   "code": "002980",
+   "name": "华盛昌",
+   "pct": 10.0,
+   "board": "电网设备",
+   "turnover": 10.99,
+   "vol_ratio": 1.24,
+   "main_inflow": 322499672.0,
+   "price": 118.1,
+   "high": 118.1,
+   "pre_close": 107.36
+  },
+  {
+   "code": "001267",
+   "name": "汇绿生态",
+   "pct": 10.0,
+   "board": "通信设备",
+   "turnover": 6.63,
+   "vol_ratio": 2.04,
+   "main_inflow": 293429868.0,
+   "price": 38.71,
+   "high": 38.71,
+   "pre_close": 35.19
+  },
+  {
+   "code": "002138",
+   "name": "顺络电子",
+   "pct": 10.0,
+   "board": "元件",
+   "turnover": 5.39,
+   "vol_ratio": 1.99,
+   "main_inflow": 211482000.0,
+   "price": 48.94,
+   "high": 48.94,
+   "pre_close": 44.49
+  },
+  {
+   "code": "600345",
+   "name": "长江通信",
+   "pct": 10.0,
+   "board": "通信设备",
+   "turnover": 6.95,
+   "vol_ratio": 1.8,
+   "main_inflow": 114999859.0,
+   "price": 51.25,
+   "high": 51.25,
+   "pre_close": 46.59
+  },
+  {
+   "code": "603186",
+   "name": "华正新材",
+   "pct": 10.0,
+   "board": "元件",
+   "turnover": 12.95,
+   "vol_ratio": 1.22,
+   "main_inflow": 778151344.0,
+   "price": 186.09,
+   "high": 186.09,
+   "pre_close": 169.17
+  },
+  {
+   "code": "603083",
+   "name": "剑桥科技",
+   "pct": 10.0,
+   "board": "通信设备",
+   "turnover": 6.13,
+   "vol_ratio": 0.97,
+   "main_inflow": 1092601776.0,
+   "price": 207.21,
+   "high": 207.21,
+   "pre_close": 188.37
+  },
+  {
+   "code": "603826",
+   "name": "坤彩科技",
+   "pct": 10.0,
+   "board": "非金属材料Ⅱ",
+   "turnover": 0.76,
+   "vol_ratio": 1.12,
+   "main_inflow": 50181191.0,
+   "price": 17.38,
+   "high": 17.38,
+   "pre_close": 15.8
+  },
+  {
+   "code": "603311",
+   "name": "金海高科",
+   "pct": 10.0,
+   "board": "家电零部件Ⅱ",
+   "turnover": 1.96,
+   "vol_ratio": 1.96,
+   "main_inflow": 27046345.0,
+   "price": 29.37,
+   "high": 29.37,
+   "pre_close": 26.7
+  },
+  {
+   "code": "603009",
+   "name": "北特科技",
+   "pct": 10.0,
+   "board": "汽车零部件",
+   "turnover": 4.06,
+   "vol_ratio": 3.1,
+   "main_inflow": 175262233.0,
+   "price": 48.84,
+   "high": 48.84,
+   "pre_close": 44.4
+  },
+  {
+   "code": "600785",
+   "name": "新华百货",
+   "pct": 10.0,
+   "board": "一般零售",
+   "turnover": 23.47,
+   "vol_ratio": 1.35,
+   "main_inflow": 205770296.0,
+   "price": 12.54,
+   "high": 12.54,
+   "pre_close": 11.4
+  },
+  {
+   "code": "600127",
+   "name": "金健米业",
+   "pct": 10.0,
+   "board": "农产品加工",
+   "turnover": 21.28,
+   "vol_ratio": 0.66,
+   "main_inflow": 439399447.0,
+   "price": 13.53,
+   "high": 13.53,
+   "pre_close": 12.3
+  }
+ ]
+}
