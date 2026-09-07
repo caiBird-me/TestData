@@ -203,6 +203,73 @@ class TestRebalanceDue(unittest.TestCase):
         self.assertTrue(is_rebalance_due(20, "20260901", 21))
 
 
+class TestGateReading(unittest.TestCase):
+    """S2影子账本情绪闸门读数（与回测 make_gate 同口径：缺数据不触发）"""
+
+    def _sd(self, date="2026-09-07", promo=0.2, avg=1.5):
+        return {"date": date, "promotion_rate": promo, "sentiment": avg,
+                "lu_count": 60, "prev_lu_count": 50, "promoted": 10}
+
+    def test_trigger_promo(self):
+        from etf import gate_reading
+        on, desc, ok = gate_reading(self._sd(promo=0.10), "2026-09-07")
+        self.assertTrue(on and ok)
+        self.assertIn("晋级率", desc)
+
+    def test_trigger_avg(self):
+        from etf import gate_reading
+        on, desc, ok = gate_reading(self._sd(avg=-0.5), "2026-09-07")
+        self.assertTrue(on and ok)
+        self.assertIn("均涨幅", desc)
+
+    def test_no_trigger(self):
+        from etf import gate_reading
+        on, desc, ok = gate_reading(self._sd(), "2026-09-07")
+        self.assertFalse(on)
+        self.assertTrue(ok)
+        self.assertIn("未触发", desc)
+
+    def test_boundary_equal_not_trigger(self):
+        from etf import gate_reading
+        # 恰好等于阈值不触发（< 为严格小于，与 make_gate 一致）
+        on, _, ok = gate_reading(self._sd(promo=0.15, avg=0.0), "2026-09-07")
+        self.assertFalse(on)
+        self.assertTrue(ok)
+
+    def test_missing_or_stale_data_not_ok(self):
+        from etf import gate_reading
+        # 缺数据：不触发且 ok=False（空仓态调用方须维持空仓，防坏数据夜重进）
+        on, _, ok = gate_reading(None, "2026-09-07")
+        self.assertFalse(on)
+        self.assertFalse(ok)
+        # 过期（昨晚的读数）：今日不判闸门
+        on, _, ok = gate_reading(self._sd(date="2026-09-06"), "2026-09-07")
+        self.assertFalse(on)
+        self.assertFalse(ok)
+
+    def test_partial_missing_not_ok(self):
+        from etf import gate_reading
+        d = self._sd()
+        d["promotion_rate"] = None          # 涨停池拉取失败的夜晚
+        on, _, ok = gate_reading(d, "2026-09-07")
+        self.assertFalse(on)
+        self.assertFalse(ok)
+        d2 = self._sd()
+        del d2["sentiment"]
+        on, _, ok = gate_reading(d2, "2026-09-07")
+        self.assertFalse(on)
+        self.assertFalse(ok)
+
+    def test_custom_thresholds(self):
+        from etf import gate_reading
+        on, _, ok = gate_reading(self._sd(promo=0.18), "2026-09-07", promo_min=0.10)
+        self.assertFalse(on)
+        self.assertTrue(ok)
+        on, _, ok = gate_reading(self._sd(avg=-1.0), "2026-09-07", avg_gain_min=-2.0)
+        self.assertFalse(on)
+        self.assertTrue(ok)
+
+
 class TestBarOnOrAfter(unittest.TestCase):
     """停牌顺延≤5自然日，超过放弃"""
 

@@ -41,11 +41,12 @@ backtest:
 
 # ---------- 低频三策略（换战场：ETF趋势/行业轮动/小市值轮动） ----------
 # 打板八年回测全负后转向的低频战场：不抢速度、摩擦占比低、机器不与散户抢。
-# 三个策略各一本虚拟账本（books），回测+4周虚拟验证后按表现集中资金。
-books:                       # 三本虚拟账本（py src/main.py lowfreq 每晚维护）
-  trend:    {capital: 1000, costs: etf_free}    # S1：免五口径（回测双场景的基准列）
-  rotation: {capital: 1000, costs: etf_free}
-  smallcap: {capital: 1000, costs: stock_std}   # S3：股票成本（含印花税）
+# 三个策略四本虚拟账本（books，S2双账本：真身+情绪闸门ON影子），回测+4周虚拟验证后按表现集中资金。
+books:                       # 虚拟账本（py src/main.py lowfreq 每晚维护）
+  trend:         {capital: 1000, costs: etf_free}    # S1：免五口径（回测双场景的基准列）
+  rotation:      {capital: 1000, costs: etf_free}
+  rotation_gate: {capital: 1000, costs: etf_free}   # S2影子：情绪闸门ON对照（实盘温度计口径，不动真仓）
+  smallcap:      {capital: 1000, costs: stock_std}   # S3：股票成本（含印花税）
 lowfreq:
   trend:                       # S1 指数ETF趋势跟随（宽基/黄金分散趋势来源）
     universe: [510300, 510500, 159915, 512100, 510880, 518880]
@@ -62,6 +63,7 @@ lowfreq:
     top_n: 2                    # 持有前2名
     min_mom: 0.0               # 最强者动量也<0时空仓持币
     slippage: 0.001
+    gate: {promo_min: 0.15, avg_gain_min: 0.0}   # 影子账本闸门阈值（回测默认口径；实盘温度计读数）
   smallcap:                    # S3 小市值轮动（回测偏差最重，只作方向参考）
     top_n: 5
     min_list_days: 365         # 剔除次新
@@ -86,4 +88,4 @@ notify:
   # 推送渠道: serverchan / console / both
   channel: "both"
 
-schedule_note: "云端GitHub Actions: 北京时间 19:10 收盘复盘（含龙虎榜）+ 低频三账本 / 09:32 开盘确认 / 14:45 尾卖提醒（virtual_only时跳过）"
+schedule_note: "云端GitHub Actions: 北京时间 19:10 收盘复盘（含龙虎榜）+ 低频四账本 / 09:32 开盘确认 / 14:45 尾卖提醒（virtual_only时跳过）"

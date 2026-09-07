@@ -326,8 +326,9 @@ def lowfreq_daily_report(date_str, report_books):
     signals=今晚新登记的信号（明晚开盘成交）。
     """
     lines = [f"## 📊 低频虚拟盘 {date_str}", "",
-             "三本各1000元虚拟账本（回测+4周虚拟验证后按表现集中3k实盘）。"
-             "信号今晚登记、明晚按今日开盘价×滑点补账。", ""]
+             "各1000元虚拟账本（回测+4周虚拟验证后按表现集中3k实盘）。"
+             "S2 双账本对照：真身（闸门OFF）+ 影子（情绪闸门ON，实盘温度计口径）。"
+             "信号今晚登记、明晚按当日开盘价×滑点补账。", ""]
     for key, label, book, nav, day_ret, actions, signals in report_books:
         d = book.data
         capital = d.get("initial_capital", 1000)

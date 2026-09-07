@@ -12,7 +12,7 @@
 py src\main.py evening   # 收盘复盘：情绪温度计+虚拟对照组（19:10后运行，含当日龙虎榜）
 py src\main.py morning    # 开盘确认：虚拟买入记账（09:32运行，virtual_only只打日志）
 py src\main.py afternoon  # 尾盘提醒（14:45，virtual_only时直接跳过）
-py src\main.py lowfreq    # 低频三账本：补账+信号+净值（每晚收盘后，evening之后自动跑）
+py src\main.py lowfreq    # 低频四账本：补账+信号+净值（每晚收盘后，evening之后自动跑）
 py src\main.py stats      # 查看打板虚拟盘统计
 py src\main.py backtest [etf|smallcap] [起始年 结束年]  # 回测（低频两模式/打板）
 ```
@@ -38,12 +38,18 @@ py src\main.py backtest [etf|smallcap] [起始年 结束年]  # 回测（低频�
 - 北京 09:32 开盘确认（virtual_only：虚拟买入照常记账，不推送指令）
 - 北京 14:45 尾卖提醒（virtual_only：直接跳过）
 - 北京 19:10 收盘复盘（🧪虚拟对照组：情绪温度计+打板虚拟盘数据）
-  + **低频三账本**（补账今晚挂单 → 登记明晚信号 → 净值入账 → 推送）
+  + **低频虚拟账本**（补账今晚挂单 → 登记明晚信号 → 净值入账 → 推送）
 
 ## 低频三策略（当前主战场）
 
-三本各 1k 虚拟账本（`data/books/{trend,rotation,smallcap}.json`），每晚 19:10 后自动维护。
+四本各 1k 虚拟账本（`data/books/{trend,rotation,rotation_gate,smallcap}.json`），每晚 19:10 后自动维护。
 信号 D 日收盘算出、D+1 日开盘价×滑点补账成交（先卖后买、整百取整、停牌顺延≤5日）。
+
+**S2 影子账本（rotation_gate）**：与 S2 真身同逻辑，但叠加情绪闸门（晋级率<15% 或
+昨日涨停股均涨幅<0 → 次日开盘清仓持币；恢复后立即按当前动量重进）。回测显示默认
+闸门不改善 Calmar 比、且回测情绪序列与实盘温度计口径不同分布（创业板2020-08-24
+断点/ST不计入），阈值不能直接搬——影子账本用实盘读数累积样本外证据，不动真仓。
+每晚推送的全部报告同步留档 `data/logs/report_YYYY-MM.md`（CI 提交回仓库）。
 
 | 策略 | 规则 | 调仓频率 |
 |---|---|---|
@@ -109,6 +115,6 @@ src/main.py         入口      src/backtest.py   打板回测
 src/etf.py          S1/S2信号 src/smallcap.py  S3选股
 src/backtest_lowfreq.py  低频回测引擎
 data/              运行状态（持仓/信号/统计/每日归档，自动 commit 回仓库）
-data/books/        低频三账本（trend/rotation/smallcap，自动 commit）
+data/books/        低频四账本（trend/rotation/rotation_gate/smallcap，自动 commit）
 data/backtest/     回测结果摘要（K线缓存不进git）
 ```

@@ -2,8 +2,28 @@
 """推送模块：Server酱(微信) + 控制台。无 Key 时自动降级为仅控制台。"""
 import os
 import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import requests
+
+# 报告留档目录（CI 的 evening/lowfreq job 会 git add data/ 提交回仓库，
+# 用户本地 git pull 即得全量推送历史，不必再从微信复制报告对账）
+LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "logs"
+
+CN_TZ = timezone(timedelta(hours=8))
+
+
+def _archive(title, markdown):
+    """每次推送的报告本地留档一份（月度文件追加）。失败只警告不阻断推送。"""
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        now = datetime.now(CN_TZ)
+        path = LOG_DIR / f"report_{now:%Y-%m}.md"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"\n\n---\n\n## {now:%Y-%m-%d %H:%M} | {title}\n\n{markdown}\n")
+    except OSError as e:
+        print(f"[notify] 报告留档失败: {e}")
 
 
 def _get_key(cfg):
@@ -22,6 +42,7 @@ def send(cfg, title, markdown):
     except AttributeError:
         pass
     print(markdown)
+    _archive(title, markdown)   # 本地留档（无论推送成败，报告先落盘）
 
     if channel == "console":
         return True

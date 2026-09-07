@@ -5,7 +5,7 @@
   py src/main.py evening    # 收盘复盘（19:10后，含当日龙虎榜）
   py src/main.py morning    # 开盘确认买入（09:32）
   py src/main.py afternoon  # 尾盘提醒（14:45）：T+1卖出/止损提醒，只推送不改账
-  py src/main.py lowfreq    # 低频三策略虚拟账本（每晚收盘后，evening之后）
+  py src/main.py lowfreq    # 低频四账本：补账+信号+净值（每晚收盘后，evening之后）
   py src/main.py stats      # 虚拟盘统计
   py src/main.py backtest [etf|smallcap|gate] [起始年 结束年]  # 历史回测
 """
@@ -491,16 +491,17 @@ def _register_orders(book, sell_codes, buys, slot, date_str):
 
 
 def run_lowfreq(cfg):
-    """低频三策略虚拟账本（每晚收盘后运行，在 evening 之后）：
+    """低频虚拟账本（每晚收盘后运行，在 evening 之后）：
 
     补账昨晚挂单（今日开盘价×滑点）→ 计算今晚信号 → 登记新挂单
-    （明晚补账执行）→ 记净值 → 推送。三个账本各1000元虚拟资金，
-    4周后与回测对照决定3k实盘向哪个策略集中。
+    （明晚补账执行）→ 记净值 → 推送。四本账本各1000元虚拟资金
+    （S2 双账本：真身 + 情绪闸门ON影子对照），4周后与回测对照决定
+    3k实盘向哪个策略集中。
     """
     import etf as etfmod
     import smallcap as scmod
     from backtest_lowfreq import load_etf_bars
-    from etf import (trend_target, rotation_targets,
+    from etf import (trend_target, rotation_targets, gate_reading,
                      is_first_trade_day_of_month, is_rebalance_due)
 
     date_str = now_cn().strftime("%Y-%m-%d")
@@ -513,7 +514,7 @@ def run_lowfreq(cfg):
     lf = cfg.get("lowfreq") or {}
     books_cfg = cfg.get("books") or {}
     if not books_cfg:
-        print("[lowfreq] config.yaml 缺 books 段（三本虚拟账本），跳过")
+        print("[lowfreq] config.yaml 缺 books 段（四本虚拟账本），跳过")
         return 0
     costs_all = lf.get("costs") or {}
 
@@ -616,7 +617,12 @@ def run_lowfreq(cfg):
 
         reb_days = sr.get("rebalance_days", 20)
         reb = book.data.setdefault("rebalance_state", {})
-        count = reb.get("count", 0) + 1
+        # 同日重跑（CI重试/手动补跑）不双计调仓天数——挂单有 date>=今日
+        # 跳过与去重双保险，计数若也重跑会悄悄提前调仓
+        if reb.get("last_run") != date_str:
+            reb["count"] = reb.get("count", 0) + 1
+            reb["last_run"] = date_str
+        count = reb.get("count", 0)
         signals = []
         if is_rebalance_due(reb_days, reb.get("last_date"), count):
             targets, _ = rotation_targets(rot_bars, date_str, sr.get("mom_window", 20),
@@ -641,6 +647,108 @@ def run_lowfreq(cfg):
         book.save()
         report_books.append(("rotation", "S2 行业ETF轮动", book, nav, day_ret,
                              actions, signals))
+
+    # ---------- S2 影子账本（情绪闸门ON，实盘温度计口径） ----------
+    # 回测结论：默认闸门不改善Calmar（非免费午餐），且回测序列与实盘温度计
+    # 不是同一分布（创业板断点/ST不计入）——阈值不能直接搬。影子账本用
+    # evening 实时写入的情绪读数累积样本外证据，不动真仓。
+    if "rotation_gate" in books_cfg:
+        bc = books_cfg["rotation_gate"]
+        book = pf.Portfolio(bc.get("capital", 1000), costs_all.get(bc.get("costs")),
+                            book="rotation_gate")
+        pending = book.data.get("pending_trades") or []
+        sells = [o for o in pending if o["action"] == "sell"]
+        buys = [o for o in pending if o["action"] == "buy"]
+        opens = _open_prices_for([o["code"] for o in pending])
+        top_n = sr.get("top_n", 2)
+        actions, rest = _exec_pending_orders(book, sells + buys, opens,
+                                             sr.get("slippage", 0.001), top_n,
+                                             date_str)
+        book.data["pending_trades"] = rest
+
+        gcfg = sr.get("gate") or {}
+        gate_on, gate_desc, gate_ok = gate_reading(
+            _load_sentiment(), date_str,
+            gcfg.get("promo_min", 0.15), gcfg.get("avg_gain_min", 0.0))
+        reb = book.data.setdefault("rebalance_state", {})
+        gstate = book.data.setdefault("gate_state", {"gated_out": False})
+        reb_days = sr.get("rebalance_days", 20)
+        if reb.get("last_run") != date_str:
+            reb["count"] = reb.get("count", 0) + 1
+            reb["last_run"] = date_str
+        count = reb.get("count", 0)
+        held = set(book.held_codes())
+        signals = []
+
+        def _rot_buys(targets):
+            return [(c, etfmod.ETF_NAMES.get(c, c)) for c in targets
+                    if c != "__CASH__" and c not in held]
+
+        if gate_on:
+            # 闸门优先于调仓（对齐回测：gate 覆盖当晚调仓目标，调仓节奏照走）
+            if is_rebalance_due(reb_days, reb.get("last_date"), count):
+                reb.update({"last_date": date_str, "count": 0})
+            else:
+                reb["count"] = count
+            # 全清仓 + 撤销在途买单（_register_orders 的矛盾对账语义）
+            _register_orders(book, held, [], True, date_str)
+            if gstate.get("gated_out"):
+                signals = [f"{gate_desc}，继续空仓持币"]
+            else:
+                signals = [f"{gate_desc} → 清仓持币（明晚开盘执行）"]
+                gstate["gated_out"] = True
+        elif not gate_ok and gstate.get("gated_out"):
+            # 坏数据夜：读数缺失≠闸门解除。维持空仓，防止"凭缺失重进、
+            # 次日数据恢复又清仓"白付一来回成本，污染A/B对照
+            if is_rebalance_due(reb_days, reb.get("last_date"), count):
+                reb.update({"last_date": date_str, "count": 0})
+            else:
+                reb["count"] = count
+            signals = [f"⏳ {gate_desc}，维持闸门空仓（不重进）"]
+        elif gstate.get("gated_out"):
+            # 恢复：立即按当前动量重进，不等下一个调仓日（对齐回测）
+            targets, _ = rotation_targets(rot_bars, date_str, sr.get("mom_window", 20),
+                                          top_n, sr.get("min_mom", 0.0))
+            tgt = set(targets) - {"__CASH__"}
+            sell_codes = {c for c in held if c not in tgt}
+            added = _register_orders(book, sell_codes, _rot_buys(targets), True,
+                                     date_str)
+            gstate["gated_out"] = False
+            if is_rebalance_due(reb_days, reb.get("last_date"), count):
+                reb.update({"last_date": date_str, "count": 0})
+            else:
+                reb["count"] = count
+            if tgt:
+                signals = [f"闸门恢复（{gate_desc}）→ 按当前动量重进: "
+                           + "、".join(n for _, n in _rot_buys(targets))]
+            else:
+                signals = [f"闸门恢复（{gate_desc}），但全池动量≤0，空仓持币"]
+            signals += [f"{'调出' if a == 'sell' else '调入'} {n}"
+                        for a, _, n in added]
+        else:
+            # 正常轮动（与 rotation 账本同一逻辑——除闸门外两本必须同口径）
+            if is_rebalance_due(reb_days, reb.get("last_date"), count):
+                targets, _ = rotation_targets(rot_bars, date_str,
+                                              sr.get("mom_window", 20), top_n,
+                                              sr.get("min_mom", 0.0))
+                tgt = set(targets) - {"__CASH__"}
+                sell_codes = {c for c in held if c not in tgt}
+                added = _register_orders(book, sell_codes, _rot_buys(targets), True,
+                                         date_str)
+                signals = [f"{'调出' if a == 'sell' else '调入'} {n}"
+                           for a, _, n in added]
+                if not tgt:
+                    signals.append("全池动量≤0，空仓持币")
+                reb.update({"last_date": date_str, "count": 0})
+            else:
+                reb["count"] = count
+                signals = [f"距下次调仓还需 {reb_days - count} 个交易日"]
+
+        closes = {c: etf_px(c, "close") for c in book.held_codes()}
+        nav, day_ret = _book_nav(book, {c: p for c, p in closes.items() if p}, date_str)
+        book.save()
+        report_books.append(("rotation_gate", "S2 影子·情绪闸门ON", book, nav,
+                             day_ret, actions, signals))
 
     # ---------- S3 小市值轮动 ----------
     if "smallcap" in books_cfg:

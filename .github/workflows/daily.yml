@@ -69,8 +69,9 @@ jobs:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: python src/main.py evening
 
-      - name: 低频虚拟盘（三账本）
-        # 换战场后的主战场：ETF趋势/行业轮动/小市值三本虚拟账本，
+      - name: 低频虚拟盘（四账本）
+        # 换战场后的主战场：ETF趋势/行业轮动/小市值虚拟账本
+        # + S2情绪闸门ON影子对照账本，
         # 每晚补账（今日开盘价×滑点）+ 登记明晚信号 + 净值入账
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
@@ -224,7 +225,7 @@ jobs:
         run: |
           git config user.name "stock-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add data/backtest/report*.json
+          git add data/backtest/report*.json data/logs/ || true
           git diff --cached --quiet || git commit -m "data: backtest $(date -u +%F)"
           # 回测跑40分钟期间远端可能有新提交（如代码热修），先rebase再推，撞车不失败
           git pull --rebase origin develop || true

@@ -149,3 +149,33 @@ def rotation_targets(bars_by_code, date, mom_window=20, top_n=2, min_mom=0.0):
     if ranked[0][0] < min_mom:
         return ["__CASH__"], debug  # 最强者都为负：整体退潮，持币
     return [c for _, c in ranked[:top_n]], debug
+
+
+def gate_reading(sent_data, date_str, promo_min=0.15, avg_gain_min=0.0):
+    """S2 情绪闸门读数（影子账本用，实盘温度计口径）。
+
+    sent_data 为 data/sentiment.json 内容（evening 19:10 写入的 D 日收盘情绪：
+    promotion_rate=晋级率、sentiment=昨日涨停股今日均涨幅%）。判定与回测
+    make_gate 同口径：晋级率<promo_min 或 均涨幅<avg_gain_min 触发。
+    返回 (gate_on: bool, desc: str, ok: bool)：
+      ok=True  —— 读数完整，gate_on 可信（触发/未触发）
+      ok=False —— 数据缺失/过期/部分缺失，gate_on 恒 False（与回测 make_gate
+                  缺数据不触发的缺省一致，已披露偏乐观）。**与 gate_on=False 的
+                  区别在调用方**：空仓态下读到 ok=False 不许重进——坏数据夜凭
+                  "非触发"满仓重进、次日数据恢复又清仓，白付一来回成本
+                  （~0.4%/次），系统性污染影子账本的 A/B 对照。
+    desc 供日报披露读数与原因。
+    """
+    if not sent_data or sent_data.get("date") != str(date_str)[:10]:
+        return False, "情绪读数缺失/过期（sentiment.json 非今日），今晚不判闸门", False
+    promo, avg = sent_data.get("promotion_rate"), sent_data.get("sentiment")
+    if promo is None or avg is None:
+        return False, "晋级率或均涨幅缺失，今晚不判闸门", False
+    if promo < promo_min or avg < avg_gain_min:
+        why = []
+        if promo < promo_min:
+            why.append(f"晋级率{promo * 100:.0f}%<{promo_min * 100:.0f}%")
+        if avg < avg_gain_min:
+            why.append(f"均涨幅{avg:+.1f}%<{avg_gain_min:+.0f}%")
+        return True, "🧊 闸门触发（" + "、".join(why) + "）", True
+    return False, f"晋级率{promo * 100:.0f}% / 均涨幅{avg:+.1f}%，闸门未触发", True
