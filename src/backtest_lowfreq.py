@@ -273,11 +273,16 @@ def simulate_trend(bars_by_code, dates, ma_window=20, ma_confirm=1, mom_window=2
 
 def simulate_rotation(bars_by_code, dates, rebalance_days=20, mom_window=20,
                       top_n=2, min_mom=0.0, costs=None, capital=1000.0,
-                      slippage=0.001):
-    """S2：每 rebalance_days 个交易日收盘排名，次日开盘调仓（先卖后买，等权）。"""
+                      slippage=0.001, gate=None):
+    """S2：每 rebalance_days 个交易日收盘排名，次日开盘调仓（先卖后买，等权）。
+
+    gate(date)→True 为情绪闸门触发（D日收盘信息）：次日开盘清仓持币；
+    闸门恢复后立即按当前动量目标重进（不等下一个调仓日）。gate 触发期间
+    days_since 继续累计，恢复重进不重置调仓节奏。"""
     book = SimBook(capital, costs or DEFAULT_COSTS["etf_free"], slippage)
     pending = None          # 昨收算出的目标（今晨执行）
     days_since = rebalance_days  # 首日即触发
+    gated_out = False       # 当前是否处于闸门空仓状态
     for i, date in enumerate(dates):
         # 1) 执行昨收目标：今晨开盘
         if i > 0 and pending is not None:
@@ -306,6 +311,16 @@ def simulate_rotation(bars_by_code, dates, rebalance_days=20, mom_window=20,
             pending, _ = rotation_targets(bars_by_code, date, mom_window, top_n,
                                           min_mom)
             days_since = 0
+        # 2b) 情绪闸门：D日收盘读数 → 次日开盘执行
+        if gate is not None:
+            if gate(date):
+                pending = ["__CASH__"]   # 触发：次日开盘清仓（覆盖调仓目标）
+                gated_out = True
+            elif gated_out:
+                # 恢复：立即按当前动量目标重进
+                pending, _ = rotation_targets(bars_by_code, date, mom_window,
+                                               top_n, min_mom)
+                gated_out = False
         # 3) 记净值
         _nav(book, bars_by_code, date, book.positions)
     return book
@@ -754,10 +769,136 @@ def _report_smallcap(start_year, end_year, m, book, n_months, n_fail,
     return "\n".join(lines)
 
 
+def run_gate_backtest(cfg, start_year=None, end_year=None):
+    """S2 情绪闸门对比回测：晋级率<15% 或 涨停均涨幅<0 → 清仓持币。
+
+    预注册预期（跑之前写下，防事后解释）：
+      闸门ON 相对 OFF —— 最大回撤从 -64% 收窄到 -45%~-60%（闸门日频粒度
+      慢于动量崩塌，收不到更多）；总收益相对变化 -30%~+10%（闸门空仓期
+      可能踏空反弹）。若总收益与回撤同时大幅改善，先查未来函数/过拟合，
+      再谈结论。
+    """
+    st = (cfg.get("lowfreq") or {})
+    costs_cfg = {**DEFAULT_COSTS, **(st.get("costs") or {})}
+    end_year = end_year or now_cn().year
+    start_year = start_year or 2019
+    fetch_start = f"{start_year - 1}-01-01"
+
+    import sentiment_hist as sh
+
+    sr = st.get("rotation") or {}
+
+    def _codes(lst):
+        return [str(c).zfill(6) for c in (lst or [])]
+
+    rot_u = _codes(sr.get("universe")) or ROTATION_UNIVERSE
+    print("[gate-bt] 构建历史情绪序列（全市场个股K线，复用已有序列）...",
+          flush=True)
+    series = sh.build_sentiment_history(
+        start_year, workers=cfg.get("backtest", {}).get("workers", 6))
+    print(f"[gate-bt] 拉取 {len(rot_u)} 只ETF日K ...", flush=True)
+    bars_by_code = load_etf_bars(sorted(set(rot_u) | {"510300"}),
+                                 fetch_start, now_cn().strftime("%Y-%m-%d"))
+    if "510300" not in bars_by_code:
+        raise RuntimeError("510300（主日历）K线拉取失败，中止")
+    rot_bars = {c: bars_by_code[c] for c in rot_u if c in bars_by_code}
+    dates_all = [b["date"][:10] for b in bars_by_code["510300"]]
+    dates = [d for d in dates_all if f"{start_year}-01-01" <= d <= f"{end_year}-12-31"]
+
+    reb = sr.get("rebalance_days", 20)
+    mom = sr.get("mom_window", 20)
+    top_n = sr.get("top_n", 2)
+    min_mom = sr.get("min_mom", 0.0)
+    sl = sr.get("slippage", 0.001)   # S2滑点读rotation节（与实盘main.py同源）
+
+    gate_def = sh.make_gate(series, promo_min=0.15, avg_gain_min=0.0)
+    n_gate_days = sum(1 for d in dates if gate_def(d))
+
+    def _run(costs, gate):
+        book = simulate_rotation(rot_bars, dates, rebalance_days=reb,
+                                 mom_window=mom, top_n=top_n, min_mom=min_mom,
+                                 costs=costs, capital=1000.0, slippage=sl,
+                                 gate=gate)
+        m = _metrics(book.nav_curve)
+        m["n_trades"] = len(book.trades)
+        m["costs"] = round(book.total_costs, 1)
+        return m
+
+    rows = {}
+    for cname in ("etf_free", "etf_std"):
+        rows[f"off_{cname}"] = _run(costs_cfg[cname], None)
+        rows[f"on_{cname}"] = _run(costs_cfg[cname], gate_def)
+    # 敏感性（仅免五口径，防单阈值巧合；不可用于事后挑最优——那是选择偏差）
+    rows["on_free_p10"] = _run(costs_cfg["etf_free"],
+                               sh.make_gate(series, promo_min=0.10,
+                                            avg_gain_min=0.0))
+    rows["on_free_ag1"] = _run(costs_cfg["etf_free"],
+                               sh.make_gate(series, promo_min=0.15,
+                                            avg_gain_min=-1.0))
+    bench = _metrics(_buyhold_nav(bars_by_code["510300"], dates, 1000.0))
+
+    # ---- 报告 ----
+    L = [f"## 🚪 S2 情绪闸门对比回测 {start_year}-{end_year}", ""]
+    L.append(f"闸门口径：晋级率<15% 或 涨停均涨幅<0（D日收盘读数，D+1开盘执行）| "
+             f"触发 {n_gate_days}/{len(dates)} 个交易日 | "
+             f"恢复后立即按当前动量重进")
+    L.append("")
+    L.append("| 场景 | 年化 | 最大回撤 | 总收益 | 成交笔数 |")
+    L.append("|---|---|---|---|---|")
+    label = {"off_etf_free": "闸门OFF 免五", "on_etf_free": "闸门ON 免五",
+             "off_etf_std": "闸门OFF 万2.5最低5元",
+             "on_etf_std": "闸门ON 万2.5最低5元",
+             "on_free_p10": "敏感性：晋级率<10%", "on_free_ag1": "敏感性：均涨幅<-1%"}
+    for k in ("off_etf_free", "on_etf_free", "off_etf_std", "on_etf_std",
+              "on_free_p10", "on_free_ag1"):
+        r = rows[k]
+        L.append(f"| {label[k]} | {_fmt_pct(r['annual'])} | {_fmt_pct(r['mdd'])} "
+                 f"| {_fmt_pct(r['total'])} | {r['n_trades']} |")
+    L.append(f"| 基准 510300 持有 | {_fmt_pct(bench['annual'])} | "
+             f"{_fmt_pct(bench['mdd'])} | {_fmt_pct(bench['total'])} | - |")
+    L.append("")
+    on, off = rows["on_etf_free"], rows["off_etf_free"]
+    rel = on["total"] / (1 + off["total"]) - 1 if off["total"] > -1 else None
+    in_range = (rel is not None and -0.30 <= rel <= 0.10
+                and -0.60 <= on["mdd"] <= -0.45)
+    verdict = ("落在预注册区间内" if in_range
+               else "⚠️ 超出预注册区间，先查代码再谈结论")
+    L.append("**预注册核对**：预期 mdd 收窄到 -45%~-60%、总收益相对变化 -30%~+10%。"
+             f"实际：mdd {on['mdd']:.1%} vs 无闸门 {off['mdd']:.1%}，"
+             f"总收益 {on['total']:+.1%} vs {off['total']:+.1%}——{verdict}")
+    L.append("")
+    L.append("**⚠️ 偏差与口径（读数字前必读）**：")
+    L.append("- 情绪序列为原始价涨停判定：除权日涨停漏检（分子分母同受影响，"
+             "方向未定）；ST股5%涨停不计入；创业板2020-08-24前为10%涨停"
+             "时代、被19.85%判定整体漏计（序列在2020-08-24有结构性断点）；"
+             "新股上市首日不计入")
+    L.append("- **回测序列与实盘温度计（东财涨停池口径）不是同一分布**——"
+             "本报告验证的15%/0阈值只在回测口径内有效，搬去实盘前必须按"
+             "实盘口径重新校准")
+    L.append("- 闸门无数据日不触发（偏乐观缺省）；幸存者偏差同打板回测"
+             "（情绪为全市场聚合统计，个股层面影响远小于S3）")
+    L.append("- 万2.5口径下闸门ON若后期年份收益归零/冻结，是**账本耗尽伪影**"
+             "（现金被最低佣金磨光后，单槽预算 total/top_n 低于一手ETF，"
+             "永远无法再买入），非策略表现")
+    L.append("- 敏感性两行只看方向稳健性，不可用于挑最优阈值。"
+             "闸门ON的成本含恢复重进的额外换手。")
+    md = "\n".join(L)
+
+    summary = {
+        "generated": now_cn().strftime("%Y-%m-%d %H:%M"),
+        "range": f"{start_year}-{end_year}",
+        "gate_days": n_gate_days, "trade_days": len(dates),
+        "rows": rows, "benchmark_510300": bench,
+    }
+    return md, summary
+
+
 def run_lowfreq_backtest(cfg, mode, start_year=None, end_year=None):
-    """统一入口：mode = 'etf' | 'smallcap'。返回 (markdown, summary)。"""
+    """统一入口：mode = 'etf' | 'smallcap' | 'gate'。返回 (markdown, summary)。"""
     if mode == "etf":
         return run_etf_backtest(cfg, start_year, end_year)
     if mode == "smallcap":
         return run_smallcap_backtest(cfg, start_year, end_year)
+    if mode == "gate":
+        return run_gate_backtest(cfg, start_year, end_year)
     raise ValueError(f"未知回测模式: {mode}")

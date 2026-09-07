@@ -7,7 +7,7 @@
   py src/main.py afternoon  # 尾盘提醒（14:45）：T+1卖出/止损提醒，只推送不改账
   py src/main.py lowfreq    # 低频三策略虚拟账本（每晚收盘后，evening之后）
   py src/main.py stats      # 虚拟盘统计
-  py src/main.py backtest [etf|smallcap] [起始年 结束年]  # 历史回测
+  py src/main.py backtest [etf|smallcap|gate] [起始年 结束年]  # 历史回测
 """
 import json
 import os
@@ -691,7 +691,7 @@ def run_lowfreq(cfg):
 def run_backtest(cfg, start_year=None, end_year=None, mode=None):
     """历史回测。mode=None/'paband'：打板事件回测（原行为）；
     mode='etf'/'smallcap'：低频三策略回测（backtest_lowfreq）。"""
-    if mode in ("etf", "smallcap"):
+    if mode in ("etf", "smallcap", "gate"):
         import backtest_lowfreq as btlf
         md, summary = btlf.run_lowfreq_backtest(cfg, mode, start_year, end_year)
         out = Path("data/backtest")
