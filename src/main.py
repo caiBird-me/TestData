@@ -919,7 +919,10 @@ def main():
         tb = traceback.format_exc()
         print(tb)
         try:
-            notify.send(cfg, f"❌ {cmd} 运行异常", "```\n" + tb[-1500:] + "\n```")
+            # 异常标题带 HH:MM：同日多次异常（CI重试/手动补跑各挂一处）各留
+            # 一份留档——固定标题会被覆盖写吞掉前一次的 traceback
+            notify.send(cfg, f"❌ {cmd} 运行异常 {now_cn():%H:%M}",
+                        "```\n" + tb[-1500:] + "\n```")
         except Exception:
             pass
         return 1

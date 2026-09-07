@@ -408,7 +408,9 @@ class TestPortfolioBooks(unittest.TestCase):
 
     def test_lowfreq_extension_fields_defaulted(self):
         from portfolio import Portfolio
-        p = Portfolio(1000, book="rotation")
+        # 隔离账本名：真实 data/books/*.json 有 CI 每晚提交的运行状态，
+        # 默认字段测试不得依赖仓库当前数据（构造只读不写，不留测试文件）
+        p = Portfolio(1000, book="unit_tmp_fields")
         self.assertEqual(p.data["pending_trades"], [])
         self.assertEqual(p.data["nav_history"], [])
         self.assertEqual(p.data["rebalance_state"], {})
