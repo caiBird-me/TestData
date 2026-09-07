@@ -44,9 +44,25 @@ def fmt_ltb(pick):
     return " | ".join(parts)
 
 
+def _sentiment_plain(sentiment, promotion):
+    """情绪温度计 → 大白话短语（数据缺失时如实说缺失）"""
+    parts = []
+    if promotion and promotion[0] is not None:
+        rate = promotion[0]
+        words = "偏热，接力活跃" if rate >= 0.3 else \
+                ("中性" if rate >= 0.2 else "偏冷，接力退潮")
+        parts.append(f"晋级率{rate * 100:.0f}%（{words}）")
+    if sentiment is not None:
+        words = "偏热，赚钱效应" if sentiment >= 0 else "偏冷，亏钱效应"
+        parts.append(f"昨日涨停股今日平均{sentiment:+.1f}%（{words}）")
+    return "；".join(parts) if parts else "今日情绪数据缺失"
+
+
 def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settlements=None,
-                   sentiment=None, lu_count=0, promotion=None):
-    """晚间复盘报告。promotion=(晋级率, 昨日涨停数, 晋级数)"""
+                   sentiment=None, lu_count=0, promotion=None, gate=None):
+    """晚间复盘报告。promotion=(晋级率, 昨日涨停数, 晋级数)；
+    gate=(闸门是否触发, 读数描述, 读数是否完整)——由 etf.gate_reading 统一判定
+    （报告层不自造第二份阈值/缺失规则，防止与影子账本实际动作矛盾）。"""
     lines = [f"## 📊 收盘复盘 {date_str}", ""]
 
     # 市场情绪（明日早间总开关的参考）
@@ -91,23 +107,24 @@ def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settle
         lines.append("- 今日无明显主线（涨停分散）")
     lines.append("")
 
-    # 候选池
+    # 候选池（一行一事实：微信手机端窄屏，长横线拼接会折行错乱）
     lines.append("**🎯 明日候选池（按打分排序）**")
     if not picks:
         lines.append("- 今日无符合条件的候选，明日观望")
     else:
         for i, p in enumerate(picks, 1):
             low, high = p["buy_range"]
+            streak = f"/{p['streak']}板" if p["streak"] > 1 else ""
+            lines.append(f"{i}. **{p['name']}({p['code']})** {p['kind']}{streak}，打分{p['score']}")
+            lines.append(f"   板块 {p['board']}，今日{p['pct']:+.1f}% 收{p['price']:.2f}元"
+                         f"（换手{p['turnover']:.1f}%，主力净流入{fmt_amount(p['main_inflow'])}）")
+            lines.append(f"   📌 买入 **{low}~{high}元**，止损 **{p['stop_loss']}元**")
             seal = fmt_seal(p)
-            lines.append(
-                f"{i}. **{p['name']}({p['code']})** [{p['kind']}"
-                + (f"/{p['streak']}板" if p["streak"] > 1 else "") + "] "
-                f"板块:{p['board']} | 今日{p['pct']:+.1f}% 收{p['price']:.2f}元 | "
-                f"换手{p['turnover']:.1f}% | 主力净流入{fmt_amount(p['main_inflow'])}\n"
-                f"   📌 计划买入: **{low}~{high}元** | 止损: **{p['stop_loss']}元** | 打分{p['score']}"
-                + (f"\n   🔒 {seal}" if seal else "")
-                + (f"\n   🐯 {fmt_ltb(p)}" if fmt_ltb(p) else "")
-            )
+            if seal:
+                lines.append(f"   🔒 {seal}")
+            ltb = fmt_ltb(p)
+            if ltb:
+                lines.append(f"   🐯 {ltb}")
     lines.append("")
 
     # 风控提示
@@ -118,6 +135,24 @@ def evening_report(date_str, themes, limit_ups, picks, risk_rules, pause, settle
     lines.append(f"- 高开>{risk_rules.max_gap_up_pct*100:.0f}%不追，低开<{risk_rules.min_gap_pct*100:.0f}%不买")
     if pause:
         lines.append(f"- 🚨 **熔断**：{pause}")
+    lines.append("")
+
+    # ---------- 大白话总结（手机一眼读懂数字在说什么） ----------
+    lines.append("**🗣️ 大白话**")
+    lines.append(f"- 市场情绪：{_sentiment_plain(sentiment, promotion)}")
+    if gate:
+        gate_on, gate_desc, gate_ok = gate
+        if gate_on:
+            # 意图式措辞：清仓要等 lowfreq 任务跑完才登记，失败以低频报告为准
+            lines.append(f"- {gate_desc}，影子账本今晚登记清仓信号"
+                         "（以稍后的低频报告为准），S2 真身轮动不受影响。")
+        elif not gate_ok:
+            lines.append(f"- {gate_desc}，影子账本维持原状（已空仓则不重进）。")
+        else:
+            lines.append(f"- {gate_desc}，影子账本正常轮动。")
+    else:
+        lines.append("- 情绪闸门状态今晚未判（见低频报告）。")
+    lines.append("- 打板候选是虚拟对照组，不用手动操作；低频账本全部自动。")
     lines.append("")
     lines.append("_数据来源: 东方财富 | 仅供参考，不构成投资建议_")
     return "\n".join(lines)
@@ -318,17 +353,20 @@ def set_signals(signals):
     _signals = signals
 
 
-def lowfreq_daily_report(date_str, report_books):
+def lowfreq_daily_report(date_str, report_books, gate_desc=None):
     """低频三策略虚拟账本日报。
 
     report_books: [(key, label, book, nav, day_ret, actions, signals)]，
     book 为 Portfolio 实例（取持仓/现金/成本），actions=今晚补账成交日志，
-    signals=今晚新登记的信号（明晚开盘成交）。
+    signals=今晚新登记的信号（明晚开盘成交）。gate_desc 为今晚情绪闸门读数
+    （影子账本口径），供末尾大白话总结引用。
     """
     lines = [f"## 📊 低频虚拟盘 {date_str}", "",
              "各1000元虚拟账本（回测+4周虚拟验证后按表现集中3k实盘）。"
              "S2 双账本对照：真身（闸门OFF）+ 影子（情绪闸门ON，实盘温度计口径）。"
              "信号今晚登记、明晚按当日开盘价×滑点补账。", ""]
+    short = {"trend": "S1趋势", "rotation": "S2轮动",
+             "rotation_gate": "S2影子", "smallcap": "S3小市值"}
     for key, label, book, nav, day_ret, actions, signals in report_books:
         d = book.data
         capital = d.get("initial_capital", 1000)
@@ -350,5 +388,44 @@ def lowfreq_daily_report(date_str, report_books):
         if signals:
             lines.append("- 今晚信号: " + "；".join(signals))
         lines.append("")
+    lines.extend(_plain_lowfreq(date_str, report_books, short, gate_desc))
     lines.append("_虚拟盘验证阶段，不构成投资建议_")
     return "\n".join(lines)
+
+
+def _plain_lowfreq(date_str, report_books, short, gate_desc=None):
+    """低频日报大白话总结——全部从账本实算，不编数字。"""
+    lines = ["**🗣️ 大白话**"]
+    try:
+        if not report_books:
+            raise ValueError("账本列表为空")
+        # 今日各账本盈亏（元）：nav_history 去掉今日后取最近一晚
+        deltas = {}
+        for key, label, book, nav, day_ret, actions, signals in report_books:
+            nh = [x for x in book.data.get("nav_history", [])
+                  if x["date"] != date_str]
+            prev = nh[-1]["value"] if nh else book.data.get("initial_capital", 1000)
+            deltas[key] = nav - prev
+        total = sum(deltas.values())
+        lines.append(f"- {len(report_books)}本账本今天合计 **{total:+.2f}元**。")
+        best = max(report_books, key=lambda r: r[4])
+        worst = min(report_books, key=lambda r: r[4])
+        if best[0] != worst[0]:
+            lines.append(f"- 最好 {short.get(best[0], best[0])}（今日{best[4]:+.2f}%），"
+                         f"最差 {short.get(worst[0], worst[0])}（{worst[4]:+.2f}%）。")
+        rot = next((r for r in report_books if r[0] == "rotation"), None)
+        gate = next((r for r in report_books if r[0] == "rotation_gate"), None)
+        if rot and gate:
+            diff = rot[3] - gate[3]
+            if abs(diff) < 0.005:
+                lines.append("- S2 对照：真身与影子目前基本持平。")
+            elif diff > 0:
+                lines.append(f"- S2 对照：闸门少赚 {diff:.2f}元（空仓躲跌的代价）。")
+            else:
+                lines.append(f"- S2 对照：闸门多赚 {-diff:.2f}元（避开了一段下跌）。")
+        if gate_desc:
+            lines.append(f"- 情绪闸门：{gate_desc}。")
+    except (KeyError, TypeError, ValueError, IndexError):
+        lines.append("- （大白话总结计算失败，请读上方原始数字）")
+    lines.append("- 你要做的：什么都不用做，全部自动。")
+    return lines

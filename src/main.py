@@ -146,6 +146,15 @@ def run_evening(cfg):
         print(f"[evening] 晋级率: {promotion[2]}/{promotion[1]} = {promotion[0]*100:.0f}%")
     _save_sentiment(date_str, sentiment, lu_count, promotion)
 
+    # 影子账本情绪闸门读数（与 run_lowfreq 同函数同阈值，避免报告/账本两套口径）：
+    # evening 先跑、lowfreq 后跑，两边对同一份 sentiment.json 的判定必须一致
+    from etf import gate_reading
+    gcfg = ((cfg.get("lowfreq") or {}).get("rotation") or {}).get("gate") or {}
+    gate = gate_reading(
+        {"date": date_str, "sentiment": sentiment,
+         "promotion_rate": promotion[0] if promotion else None},
+        date_str, gcfg.get("promo_min", 0.15), gcfg.get("avg_gain_min", 0.0))
+
     # 归档保留策略：原始数据只留最近10天（一天上百KB，防止仓库膨胀）
     removed = ds.cleanup_archives()
     if removed:
@@ -153,7 +162,7 @@ def run_evening(cfg):
 
     md = report.evening_report(date_str, themes, limit_ups, picks, rules,
                                 pause_reason if pause else None, settlements,
-                                sentiment, lu_count, promotion)
+                                sentiment, lu_count, promotion, gate)
     # 打板降级后晚间复盘保留推送：情绪温度计（晋级率/涨停均涨幅）与虚拟对照组数据
     title = f"🧪虚拟对照组|收盘复盘 {date_str}" if _paband_virtual_only(cfg) \
         else f"收盘复盘 {date_str}"
@@ -547,6 +556,7 @@ def run_lowfreq(cfg):
         return None
 
     report_books = []
+    gate_desc = None      # 今晚情绪闸门读数（影子账本口径，日报大白话引用）
 
     def _open_prices_for(codes):
         """挂单代码 → 今日开盘价。ETF走日K；股票走快照（open字段）。"""
@@ -791,7 +801,7 @@ def run_lowfreq(cfg):
         report_books.append(("smallcap", "S3 小市值轮动", book, nav, day_ret,
                              actions, signals))
 
-    md = report.lowfreq_daily_report(date_str, report_books)
+    md = report.lowfreq_daily_report(date_str, report_books, gate_desc)
     notify.send(cfg, f"低频虚拟盘 {date_str}", md)
     return 0
 

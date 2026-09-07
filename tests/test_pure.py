@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 os.chdir(Path(__file__).resolve().parent.parent)
 
 from datasource import calc_streak_codes, code_to_secid, is_limit_up, limit_up_pct
+import report
 from risk import RiskRules
 from strategy import (STREAK_SCORE, find_main_themes, in_themes,
                       streak_score, turnover_bounds)
@@ -1003,6 +1004,111 @@ class TestLtbQuality(unittest.TestCase):
         ])
         self.assertIn("拉萨天团(散户)", labels)
         self.assertEqual(bonus, -4)
+
+
+class TestPlainSummary(unittest.TestCase):
+    """大白话总结纯函数：数字从账本实算、边界（空列表/同分/脏数据/缺失）钉死"""
+
+    SHORT = {"trend": "S1趋势", "rotation": "S2轮动",
+             "rotation_gate": "S2影子", "smallcap": "S3小市值"}
+
+    @staticmethod
+    def _book(key, nav, day_ret, prev=None, capital=1000):
+        class _B:
+            pass
+        b = _B()
+        b.data = {"initial_capital": capital,
+                  "nav_history": ([{"date": "2026-09-04", "value": prev}]
+                                 if prev is not None else [])}
+        return (key, key, b, nav, day_ret, [], [])
+
+    def test_plain_lowfreq_totals_from_prev_nav(self):
+        """合计=各账本 nav-前一日净值，与主体 day_ret 同口径"""
+        books = [self._book("trend", 1010.0, 1.0, prev=1000.0),
+                 self._book("rotation", 990.0, -1.0, prev=1000.0),
+                 self._book("rotation_gate", 1000.0, 0.0, prev=1000.0),
+                 self._book("smallcap", 1005.0, 0.5, prev=1000.0)]
+        lines = report._plain_lowfreq("2026-09-07", books, self.SHORT)
+        text = "\n".join(lines)
+        self.assertIn("4本账本今天合计 **+5.00元**", text)
+        self.assertIn("最好 S1趋势", text)
+        self.assertIn("最差 S2轮动", text)
+
+    def test_plain_lowfreq_first_day_falls_back_to_capital(self):
+        """首日无 nav_history：prev 回退 initial_capital"""
+        books = [self._book("trend", 1012.0, 1.2)]
+        lines = report._plain_lowfreq("2026-09-07", books, self.SHORT)
+        self.assertIn("**+12.00元**", "\n".join(lines))
+
+    def test_plain_lowfreq_same_day_rerun_idempotent(self):
+        """nav_history 含今日条目（同日重跑）不计入 prev"""
+        b = self._book("trend", 1010.0, 1.0)[2]
+        b.data["nav_history"].append({"date": "2026-09-07", "value": 1008.0})
+        books = [("trend", "S1趋势", b, 1010.0, 1.0, [], [])]
+        lines = report._plain_lowfreq("2026-09-07", books, self.SHORT)
+        self.assertIn("**+10.00元**", "\n".join(lines))
+
+    def test_plain_lowfreq_tie_single_book(self):
+        """首夜全 0%：best==worst 不输出"最好/最差"自相矛盾行"""
+        books = [self._book(k, 1000.0, 0.0) for k in self.SHORT]
+        text = "\n".join(report._plain_lowfreq("2026-09-07", books, self.SHORT))
+        self.assertNotIn("最好", text)
+
+    def test_plain_lowfreq_empty_books(self):
+        """空账本列表：不编造 +0.00元，走兜底"""
+        text = "\n".join(report._plain_lowfreq("2026-09-07", [], self.SHORT))
+        self.assertIn("计算失败", text)
+        self.assertNotIn("+0.00元", text)
+
+    def test_plain_lowfreq_gate_desc_and_rot_diff(self):
+        """S2 真身vs影子差额三向 + gate_desc 透传"""
+        books = [self._book("rotation", 1006.0, -0.4, prev=1010.0),
+                 self._book("rotation_gate", 1002.0, -0.8, prev=1010.0)]
+        text = "\n".join(report._plain_lowfreq(
+            "2026-09-07", books, self.SHORT, "🧊 闸门触发（晋级率10%<15%）"))
+        self.assertIn("闸门少赚 4.00元", text)
+        books[1] = self._book("rotation_gate", 1014.0, 0.4, prev=1010.0)
+        text = "\n".join(report._plain_lowfreq("2026-09-07", books, self.SHORT))
+        self.assertIn("闸门多赚 8.00元", text)
+        books[1] = self._book("rotation_gate", 1006.0, -0.4, prev=1010.0)
+        text = "\n".join(report._plain_lowfreq("2026-09-07", books, self.SHORT))
+        self.assertIn("基本持平", text)
+
+    def test_plain_lowfreq_dirty_data_fallback(self):
+        """nav_history=None 等脏数据：兜底行替代编造数字"""
+        class _B:
+            data = {"initial_capital": 1000, "nav_history": None}
+        books = [("trend", "S1趋势", _B(), 1000.0, 0.0, [], [])]
+        text = "\n".join(report._plain_lowfreq("2026-09-07", books, self.SHORT))
+        self.assertIn("计算失败", text)
+        self.assertIn("什么都不用做", text)
+
+    def test_sentiment_plain_phrases(self):
+        self.assertIn("偏冷，接力退潮", report._sentiment_plain(-1.5, (0.12, 50, 6)))
+        self.assertIn("偏热，接力活跃", report._sentiment_plain(1.5, (0.36, 50, 18)))
+        self.assertIn("数据缺失", report._sentiment_plain(None, None))
+        self.assertIn("中性", report._sentiment_plain(None, (0.25, 50, 12)))
+
+    def test_evening_gate_line_uses_reading(self):
+        """evening 大白话的闸门行完全由 gate 三元组驱动（不自造阈值）"""
+        md = report.evening_report(
+            "2026-09-07", [], [], [], make_rules(), None,
+            sentiment=-1.5, promotion=(0.12, 50, 6),
+            gate=(True, "🧊 闸门触发（晋级率12%<15%）", True))
+        self.assertIn("登记清仓信号", md)
+        md = report.evening_report(
+            "2026-09-07", [], [], [], make_rules(), None,
+            sentiment=None, promotion=None,
+            gate=(False, "晋级率或均涨幅缺失，今晚不判闸门", False))
+        self.assertIn("维持原状", md)
+        md = report.evening_report(
+            "2026-09-07", [], [], [], make_rules(), None,
+            sentiment=1.5, promotion=(0.36, 50, 18),
+            gate=(False, "晋级率36% / 均涨幅+1.5%，闸门未触发", True))
+        self.assertIn("正常轮动", md)
+        # gate=None（调用方没算）：不谎报任何状态
+        md = report.evening_report("2026-09-07", [], [], [], make_rules(), None)
+        self.assertIn("今晚未判", md)
 
 
 if __name__ == "__main__":
