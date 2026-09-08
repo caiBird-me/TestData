@@ -12,12 +12,12 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "信号过期（非次日，作废）"
  },
  {
   "code": "000428",
@@ -32,12 +32,12 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "信号过期（非次日，作废）"
  },
  {
   "code": "000735",
@@ -52,12 +52,12 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "信号过期（非次日，作废）"
  },
  {
   "code": "002564",
@@ -72,12 +72,12 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "信号过期（非次日，作废）"
  },
  {
   "code": "002403",
@@ -92,11 +92,11 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "信号过期（非次日，作废）"
  }
 ]
