@@ -1,0 +1,36 @@
+{
+ "cash": 1000,
+ "positions": [],
+ "initial_capital": 1000,
+ "total_costs": 0.0,
+ "pending_trades": [
+  {
+   "action": "buy",
+   "code": "159825",
+   "name": "农业ETF",
+   "slot": true,
+   "date": "2026-09-08"
+  },
+  {
+   "action": "buy",
+   "code": "512800",
+   "name": "银行ETF",
+   "slot": true,
+   "date": "2026-09-08"
+  }
+ ],
+ "rebalance_state": {
+  "count": 0,
+  "last_run": "2026-09-08",
+  "last_date": "2026-09-08"
+ },
+ "nav_history": [
+  {
+   "date": "2026-09-08",
+   "value": 1000
+  }
+ ],
+ "gate_state": {
+  "gated_out": false
+ }
+}
