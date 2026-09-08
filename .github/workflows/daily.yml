@@ -47,9 +47,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # schedule 触发时按 github.event.schedule（触发的cron原文）精确分派到对应job。
+  # 旧写法 `event_name != workflow_dispatch` 对定时触发恒真——每个cron把
+  # morning/evening/afternoon 三个job全跑一遍：09:32的cron会在盘中跑19:10的
+  # evening复盘+lowfreq记账（数据不全、错点推送），且morning/evening两个job
+  # 在同一run内并发push自相撞（2026-09-08 06:08 实发：morning 06:08:22推上去，
+  # evening 06:09:13被fetch first拒绝，整run标红）
   evening:
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.job == 'evening'
+    if: (github.event_name == 'schedule' && github.event.schedule == '10 11 * * 1-5') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'evening')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -83,11 +90,15 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add data/
           git diff --cached --quiet || git commit -m "data: evening $(date -u +%F)"
+          # 运行期间远端可能有新提交（本地热修/前一个run的数据），先rebase再推。
+          # 冲突时显式中止并退出：让job红在rebase这一步，而不是含混的push被拒
+          git pull --rebase origin develop || { git rebase --abort; exit 1; }
           git push
 
   morning:
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.job == 'morning'
+    if: (github.event_name == 'schedule' && github.event.schedule == '32 1 * * 1-5') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'morning')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -113,12 +124,14 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add data/
           git diff --cached --quiet || git commit -m "data: morning $(date -u +%F)"
+          git pull --rebase origin develop || { git rebase --abort; exit 1; }
           git push
 
   afternoon:
     # 尾卖提醒（14:45）：只推送不改账，记账统一在15:10 evening（用收盘价）
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.job == 'afternoon'
+    if: (github.event_name == 'schedule' && github.event.schedule == '45 6 * * 1-5') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'afternoon')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -142,6 +155,7 @@ jobs:
     # 手动触发低频虚拟盘（正常由 evening job 每晚自动带跑）
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'lowfreq'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -167,12 +181,13 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add data/
           git diff --cached --quiet || git commit -m "data: lowfreq $(date -u +%F)"
-          git pull --rebase origin develop || true
+          git pull --rebase origin develop || { git rebase --abort; exit 1; }
           git push
 
   stats:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'stats'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -209,16 +224,21 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: 历史回测
+        # inputs 经 ${{ }} 直接内插进 shell 会被拼进命令（script injection），
+        # 统一走 env 中转——虽然只有协作者能触发，习惯上不留这个口子
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
           # Python stdout块缓冲曾让60分钟运行的日志全被吞掉（杀进程时缓冲区丢弃）
           # ——排障时完全黑盒，强制行缓冲让日志实时可见
           PYTHONUNBUFFERED: 1
+          BT_MODE: ${{ github.event.inputs.mode }}
+          BT_START: ${{ github.event.inputs.start_year }}
+          BT_END: ${{ github.event.inputs.end_year }}
         run: |
           ARGS=""
-          [ -n "${{ github.event.inputs.mode }}" ] && ARGS="$ARGS ${{ github.event.inputs.mode }}"
-          [ -n "${{ github.event.inputs.start_year }}" ] && ARGS="$ARGS ${{ github.event.inputs.start_year }}"
-          [ -n "${{ github.event.inputs.end_year }}" ] && ARGS="$ARGS ${{ github.event.inputs.end_year }}"
+          [ -n "$BT_MODE" ] && ARGS="$ARGS $BT_MODE"
+          [ -n "$BT_START" ] && ARGS="$ARGS $BT_START"
+          [ -n "$BT_END" ] && ARGS="$ARGS $BT_END"
           python src/main.py backtest $ARGS
 
       - name: 提交回测摘要
@@ -227,6 +247,7 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add data/backtest/report*.json data/logs/ || true
           git diff --cached --quiet || git commit -m "data: backtest $(date -u +%F)"
-          # 回测跑40分钟期间远端可能有新提交（如代码热修），先rebase再推，撞车不失败
-          git pull --rebase origin develop || true
+          # 回测跑40分钟期间远端可能有新提交（如代码热修），先rebase再推；
+          # 冲突时显式中止并退出（理由同evening job）
+          git pull --rebase origin develop || { git rebase --abort; exit 1; }
           git push
