@@ -114,12 +114,12 @@
   ],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  },
  {
   "code": "002470",
@@ -137,12 +137,12 @@
   ],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  },
  {
   "code": "603999",
@@ -157,12 +157,12 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  },
  {
   "code": "601949",
@@ -177,12 +177,12 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  },
  {
   "code": "000759",
@@ -197,12 +197,12 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  },
  {
   "code": "000978",
@@ -219,12 +219,12 @@
   ],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  },
  {
   "code": "002470",
@@ -242,12 +242,12 @@
   ],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  },
  {
   "code": "603999",
@@ -262,12 +262,12 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  },
  {
   "code": "601949",
@@ -282,12 +282,12 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  },
  {
   "code": "000759",
@@ -302,11 +302,11 @@
   "ltb_labels": [],
   "buy_date": null,
   "buy_price": null,
-  "status": "pending",
+  "status": "cancelled",
   "settle_date": null,
   "settle_price": null,
   "pnl": null,
   "pnl_pct": null,
-  "reason": ""
+  "reason": "竞价过滤或仓位已满，未买入"
  }
 ]
