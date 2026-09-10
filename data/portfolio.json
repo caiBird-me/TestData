@@ -1,8 +1,33 @@
 {
- "cash": 3000,
- "positions": [],
+ "cash": 450.0,
+ "positions": [
+  {
+   "code": "000930",
+   "name": "中粮科技",
+   "buy_price": 6.9,
+   "shares": 200,
+   "amount": 1380.0,
+   "buy_cost": 5.0,
+   "buy_date": "2026-09-10",
+   "board": "昨日涨停_含一字",
+   "kind": "连板核心",
+   "stop_loss": 6.21
+  },
+  {
+   "code": "002295",
+   "name": "精艺股份",
+   "buy_price": 11.6,
+   "shares": 100,
+   "amount": 1160.0,
+   "buy_cost": 5.0,
+   "buy_date": "2026-09-10",
+   "board": "昨日涨停_含一字",
+   "kind": "连板核心",
+   "stop_loss": 11.22
+  }
+ ],
  "initial_capital": 3000,
- "total_costs": 0.0,
+ "total_costs": 10.0,
  "pending_trades": [],
  "rebalance_state": {},
  "nav_history": []
