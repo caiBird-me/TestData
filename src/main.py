@@ -403,13 +403,20 @@ def run_afternoon(cfg):
     return 0
 
 
-def _exec_pending_orders(book, orders, open_prices, slippage, top_n, date_str):
+def _exec_pending_orders(book, orders, open_prices, slippage, top_n, date_str,
+                         trade_dates=None):
     """低频账本挂单补账：今晚用今日开盘价×(1±滑点)成交昨晚登记的挂单。
 
     orders: pending_trades 列表（ sells 在前 buys 在后，先卖后买释放资金）。
     登记日==今天的挂单跳过（明晚才轮到它）——同日重跑不得提前成交。
-    缺开盘价的（停牌）保留次日重试，超5个自然日作废（与回测 bar_on_or_after
-    ≤5日的口径一致）。返回 (成交日志, 未成交留存)。
+    挂单只在登记日后的第一个交易日有效（对齐morning"信号次日有效，过时不候"）：
+    CI停摆/漏跑后延迟补账会按错误的开盘价成交（如09-09挂单拖到09-14按09-14
+    价成交），直接违反D→D+1不变量——过期作废，当晚重评信号重挂，明晚按明晚价成交。
+    应成交日停牌无价的留存重试，但次日仍未成交即作废（不再顺延5日：虚拟盘
+    无法区分"停牌"与"CI漏跑"，一律保守作废——与回测 bar_on_or_after ≤5日顺延
+    存在已知分叉，方向保守（漏成交而非按可疑价格成交），S3小票停牌场景需
+    在对照结论中考虑该偏差）。trade_dates=None（兼容路径）保持旧行为。
+    返回 (成交日志, 未成交留存)。
     """
     log, rest = [], []
     for o in orders:
@@ -418,6 +425,14 @@ def _exec_pending_orders(book, orders, open_prices, slippage, top_n, date_str):
         if o.get("date") >= date_str:
             rest.append(o)
             continue
+        # 挂单过期：跳过了应成交日（due）才轮到今晚跑——作废而非按今晚价补。
+        # trade_dates=None（旧单测路径）时不判过期，保持原行为
+        if trade_dates is not None:
+            due = next((d for d in trade_dates if d > o["date"]), None)
+            if due and date_str > due:
+                log.append(f"⏸️ {o['name']}({o['code']}) 挂单过期作废"
+                           f"（{o['date']}登记，跳过{due}未成交），今晚重新评估信号")
+                continue
         px = open_prices.get(o["code"])
         try:
             age = (datetime.strptime(date_str, "%Y-%m-%d")
@@ -580,7 +595,8 @@ def run_lowfreq(cfg):
         buys = [o for o in pending if o["action"] == "buy"]
         opens = _open_prices_for([o["code"] for o in pending])
         actions, rest = _exec_pending_orders(book, sells + buys, opens,
-                                             st.get("slippage", 0.001), 1, date_str)
+                                             st.get("slippage", 0.001), 1, date_str,
+                                             trade_dates=cal)
         book.data["pending_trades"] = rest
 
         target, _ = trend_target(trend_bars, date_str, st.get("ma_window", 20),
@@ -622,7 +638,8 @@ def run_lowfreq(cfg):
         opens = _open_prices_for([o["code"] for o in pending])
         top_n = sr.get("top_n", 2)
         actions, rest = _exec_pending_orders(book, sells + buys, opens,
-                                             sr.get("slippage", 0.001), top_n, date_str)
+                                             sr.get("slippage", 0.001), top_n, date_str,
+                                             trade_dates=cal)
         book.data["pending_trades"] = rest
 
         reb_days = sr.get("rebalance_days", 20)
@@ -673,7 +690,7 @@ def run_lowfreq(cfg):
         top_n = sr.get("top_n", 2)
         actions, rest = _exec_pending_orders(book, sells + buys, opens,
                                              sr.get("slippage", 0.001), top_n,
-                                             date_str)
+                                             date_str, trade_dates=cal)
         book.data["pending_trades"] = rest
 
         gcfg = sr.get("gate") or {}
@@ -771,7 +788,8 @@ def run_lowfreq(cfg):
         opens = _open_prices_for([o["code"] for o in pending])
         top_n = ss.get("top_n", 5)
         actions, rest = _exec_pending_orders(book, sells + buys, opens,
-                                             ss.get("slippage", 0.003), top_n, date_str)
+                                             ss.get("slippage", 0.003), top_n, date_str,
+                                             trade_dates=cal)
         book.data["pending_trades"] = rest
 
         signals = []
@@ -896,6 +914,8 @@ def main():
         print(__doc__)
         return 1
     cmd = sys.argv[1]
+    cfg = None  # load_config()自身抛异常时except分支引用cfg会NameError，
+    #          异常被内层pass吞掉、无推送无留档（2026-09 CI审计发现）
     try:
         cfg = load_config()
         # STOCK_FORCE=1 可跳过周末/节假日检查（手动测试用）
@@ -931,7 +951,7 @@ def main():
         try:
             # 异常标题带 HH:MM：同日多次异常（CI重试/手动补跑各挂一处）各留
             # 一份留档——固定标题会被覆盖写吞掉前一次的 traceback
-            notify.send(cfg, f"❌ {cmd} 运行异常 {now_cn():%H:%M}",
+            notify.send(cfg or {}, f"❌ {cmd} 运行异常 {now_cn():%H:%M}",
                         "```\n" + tb[-1500:] + "\n```")
         except Exception:
             pass
