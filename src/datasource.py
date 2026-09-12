@@ -786,8 +786,10 @@ def load_prev_limit_ups(n_days=10):
         return result
     today = now_cn().strftime("%Y%m%d")
     for f in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
-        if f.stem.endswith("_raw"):
-            continue  # 原始数据归档（列表结构），不参与连板计算
+        if f.stem.endswith(("_raw", "_zt", "_ltb")):
+            continue  # 原始/涨停池/龙虎榜归档（无 limit_up 字段），
+            # 排序在同名 .json 之前——不跳过会用空集合耗尽 n_days 预算，
+            # 晋级率恒 None、情绪闸门永远"不判"（2026-09-07 起实发）
         if len(result) >= n_days:
             break
         try:
