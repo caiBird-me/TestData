@@ -357,6 +357,88 @@ class TestExecPendingGuard(unittest.TestCase):
         self.assertEqual(book.calls, [("buy", "510300", "沪深300ETF", 4.004, 100)])
 
 
+class TestPendingOrderExpiry(unittest.TestCase):
+    """挂单过期：D日登记只在D+1（下一交易日）有效，过时不候——
+    跳过应成交日才补账会按错误开盘价成交，违反D→D+1不变量
+    （2026-09-10 CI停摆两天后，09-09挂单险些按09-14价成交）"""
+
+    def _book(self):
+        class Book:
+            def __init__(self):
+                self.calls = []
+                self.data = {"cash": 1000.0, "positions": []}
+
+            def sell(self, *a):
+                self.calls.append(("sell",) + a)
+                return (1.0, 0.1)
+
+            def buy(self, *a, **k):
+                self.calls.append(("buy",) + a)
+                return None
+
+        return Book()
+
+    def _order(self, date):
+        return {"action": "buy", "code": "510300", "name": "沪深300ETF",
+                "slot": True, "date": date}
+
+    def test_stale_order_voided_not_filled_at_wrong_price(self):
+        from main import _exec_pending_orders
+        # 09-09登记，停摆两天后09-14才跑：跳过了应成交日09-10 → 作废
+        book = self._book()
+        cal = ["2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11",
+               "2026-09-14"]
+        log, rest = _exec_pending_orders(book, [self._order("2026-09-09")],
+                                         {"510300": 4.0}, 0.001, 2, "2026-09-14",
+                                         trade_dates=cal)
+        self.assertEqual(book.calls, [])          # 绝不按09-14价成交
+        self.assertEqual(rest, [])                 # 也不留存（当晚重评重挂）
+        self.assertTrue(any("过期作废" in l for l in log))
+
+    def test_next_day_order_fills_normally(self):
+        from main import _exec_pending_orders
+        # 09-09登记、09-10补账：正是应成交日 → 正常成交（buy返回持仓，走成交分支）
+        class Book(self._book().__class__):
+            def buy(self, *a, **k):
+                self.calls.append(("buy",) + a)
+                return {"shares": 100}
+        book = Book()
+        cal = ["2026-09-09", "2026-09-10"]
+        log, rest = _exec_pending_orders(book, [self._order("2026-09-09")],
+                                         {"510300": 4.0}, 0.001, 2, "2026-09-10",
+                                         trade_dates=cal)
+        self.assertEqual(len(book.calls), 1)
+        self.assertTrue(any("买入" in l for l in log))
+        self.assertEqual(rest, [])
+
+    def test_suspended_on_due_day_retries_then_voids(self):
+        from main import _exec_pending_orders
+        # 09-09登记、09-10停牌无价：当日留存重试；09-11复牌有价也作废不成交——
+        # 这是与回测bar_on_or_after(≤5日顺延)的已知分叉：虚拟盘无法区分
+        # "停牌"与"CI漏跑"，一律保守作废、当晚重评信号（方向=漏成交，非按可疑价成交）
+        book = self._book()
+        cal = ["2026-09-09", "2026-09-10", "2026-09-11"]
+        log, rest = _exec_pending_orders(book, [self._order("2026-09-09")],
+                                         {}, 0.001, 2, "2026-09-10",
+                                         trade_dates=cal)
+        self.assertEqual(book.calls, [])
+        self.assertEqual(len(rest), 1)              # 应成交日当天：保留重试
+        log2, rest2 = _exec_pending_orders(book, rest, {"510300": 4.0},
+                                           0.001, 2, "2026-09-11",
+                                           trade_dates=cal)
+        self.assertEqual(book.calls, [])            # 复牌有价也不按09-11价成交
+        self.assertEqual(rest2, [])                  # 作废，当晚重评
+        self.assertTrue(any("过期作废" in l for l in log2))
+
+    def test_no_trade_dates_keeps_legacy_behavior(self):
+        from main import _exec_pending_orders
+        # trade_dates=None（兼容路径）不判过期：旧挂单照旧按今晚价成交
+        book = self._book()
+        log, rest = _exec_pending_orders(book, [self._order("2026-09-01")],
+                                         {"510300": 4.0}, 0.001, 2, "2026-09-14")
+        self.assertEqual(len(book.calls), 1)
+
+
 class TestRegisterOrders(unittest.TestCase):
     """低频挂单登记：对账（矛盾挂单作废）+ 去重（防复牌双倍成交）"""
 
