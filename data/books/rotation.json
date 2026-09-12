@@ -1,51 +1,9 @@
 {
- "cash": 200.31,
- "positions": [
-  {
-   "code": "512800",
-   "name": "银行ETF",
-   "buy_price": 0.8358,
-   "shares": 500,
-   "amount": 417.9,
-   "buy_cost": 0.21,
-   "buy_date": "2026-09-08",
-   "board": "",
-   "kind": "",
-   "stop_loss": 0
-  },
-  {
-   "code": "515220",
-   "name": "煤炭ETF",
-   "buy_price": 1.2713,
-   "shares": 300,
-   "amount": 381.39,
-   "buy_cost": 0.19,
-   "buy_date": "2026-09-08",
-   "board": "",
-   "kind": "",
-   "stop_loss": 0
-  }
- ],
+ "cash": 1000,
+ "positions": [],
  "initial_capital": 1000,
- "total_costs": 0.4,
+ "total_costs": 0.0,
  "pending_trades": [],
- "rebalance_state": {
-  "last_date": "2026-09-07",
-  "count": 2,
-  "last_run": "2026-09-09"
- },
- "nav_history": [
-  {
-   "date": "2026-09-07",
-   "value": 1000
-  },
-  {
-   "date": "2026-09-08",
-   "value": 1010.41
-  },
-  {
-   "date": "2026-09-09",
-   "value": 1023.61
-  }
- ]
+ "rebalance_state": {},
+ "nav_history": []
 }
