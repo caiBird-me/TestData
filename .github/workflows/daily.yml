@@ -95,6 +95,19 @@ jobs:
           git pull --rebase origin develop || { git rebase --abort; exit 1; }
           git push
 
+      - name: 失败告警
+        # job内任一步红（含超时被杀）即微信告警。notify.send只活在main.py进程内，
+        # 测试/装依赖/push挂掉时进程根本没起来——2026-09-10起CI停摆两天无人知晓。
+        # curl不依赖pip，装依赖步挂掉时也能响；!success()连timeout被杀也覆盖
+        if: ${{ cancelled() || failure() }}
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          curl -s -X POST "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+            --data-urlencode "title=❌ CI job ${{ github.job }} 失败" \
+            --data-urlencode "desp=[查看运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+            || true
+
   morning:
     if: (github.event_name == 'schedule' && github.event.schedule == '32 1 * * 1-5') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'morning')
     runs-on: ubuntu-latest
@@ -127,6 +140,16 @@ jobs:
           git pull --rebase origin develop || { git rebase --abort; exit 1; }
           git push
 
+      - name: 失败告警
+        if: ${{ cancelled() || failure() }}
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          curl -s -X POST "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+            --data-urlencode "title=❌ CI job ${{ github.job }} 失败" \
+            --data-urlencode "desp=[查看运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+            || true
+
   afternoon:
     # 尾卖提醒（14:45）：只推送不改账，记账统一在15:10 evening（用收盘价）
     if: (github.event_name == 'schedule' && github.event.schedule == '45 6 * * 1-5') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'afternoon')
@@ -150,6 +173,16 @@ jobs:
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: python src/main.py afternoon
+
+      - name: 失败告警
+        if: ${{ cancelled() || failure() }}
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          curl -s -X POST "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+            --data-urlencode "title=❌ CI job ${{ github.job }} 失败" \
+            --data-urlencode "desp=[查看运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+            || true
 
   lowfreq:
     # 手动触发低频虚拟盘（正常由 evening job 每晚自动带跑）
@@ -184,6 +217,16 @@ jobs:
           git pull --rebase origin develop || { git rebase --abort; exit 1; }
           git push
 
+      - name: 失败告警
+        if: ${{ cancelled() || failure() }}
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          curl -s -X POST "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+            --data-urlencode "title=❌ CI job ${{ github.job }} 失败" \
+            --data-urlencode "desp=[查看运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+            || true
+
   stats:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'stats'
     runs-on: ubuntu-latest
@@ -203,6 +246,16 @@ jobs:
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: python src/main.py stats
+
+      - name: 失败告警
+        if: ${{ cancelled() || failure() }}
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          curl -s -X POST "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+            --data-urlencode "title=❌ CI job ${{ github.job }} 失败" \
+            --data-urlencode "desp=[查看运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+            || true
 
   backtest:
     # 全市场日K扫描（~5400只，新浪源单请求全历史，6并发约20-40分钟）
@@ -251,3 +304,13 @@ jobs:
           # 冲突时显式中止并退出（理由同evening job）
           git pull --rebase origin develop || { git rebase --abort; exit 1; }
           git push
+
+      - name: 失败告警
+        if: ${{ cancelled() || failure() }}
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          curl -s -X POST "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+            --data-urlencode "title=❌ CI job ${{ github.job }} 失败" \
+            --data-urlencode "desp=[查看运行日志](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+            || true
