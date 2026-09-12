@@ -6,6 +6,7 @@
   data/signals.json    每笔信号完整生命周期
 """
 import json
+import os
 from datetime import datetime
 
 from datasource import now_cn
@@ -15,17 +16,28 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 def _load(path, default):
+    """文件不存在 → default（新账本正常初始化，这是唯一允许的"新账户"路径）。
+    文件损坏 → 抛异常：绝不用 default 静默顶上——那等于把真实账本重置成
+    新账户，历史亏损被抹掉且从不报警（乐观方向最危险的 bug）。坏文件留在
+    原地不动（不做 .bad 改名：改了名下个 run 就当文件不存在、静默重置），
+    修复前每晚都红+告警，宁可停摆也不丢账。"""
     if path.exists():
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except ValueError:
-            pass
+        except ValueError as e:
+            raise RuntimeError(
+                f"账本文件损坏，拒绝静默重置: {path}（{e}）"
+                "——请从 git 历史恢复后重跑") from e
     return default
 
 
 def _save(path, obj):
+    """临时文件+os.replace 原子替换：CI 超时被杀只可能留下旧文件或新文件，
+    不会留半个 JSON（半个 JSON 会被上面的 _load 判损坏）。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def decide_settlement(position, price, is_limit_up_today, today):
