@@ -9,6 +9,8 @@ __pycache__/
 # 临时文件
 _test*.json
 _t*.json
+# 测试隔离账本（单测构造用，严禁被 git add data/ 扫进提交后变成陈旧状态）
+data/books/unit_tmp_*.json
 
 # 回测K线缓存（5400只×几十KB，进仓库会膨胀到几百MB；report.json 摘要保留）
 data/backtest/klines/

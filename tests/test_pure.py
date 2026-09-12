@@ -589,7 +589,10 @@ class TestCosts(unittest.TestCase):
 
     def _pf(self):
         from portfolio import Portfolio
-        return Portfolio(3000)
+        # 隔离账本名：默认路径读的是真实打板账本 data/portfolio.json，
+        # 其 cash/positions 由 CI 每日提交，账户现金不足时会让成本测试
+        # 静默失败（2026-09-10 现金降至450后 CI 连续三天挂在这里）
+        return Portfolio(3000, book="unit_tmp_costs")
 
     def test_round_trip_costs(self):
         """1000元仓位一轮买卖：买佣5 + 卖佣5 + 印花税0.5 = 总成本10.5元"""
