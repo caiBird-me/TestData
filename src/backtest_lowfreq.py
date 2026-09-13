@@ -127,14 +127,18 @@ def probe_etf_source():
 
 def load_etf_bars(universe, start_date, end_date):
     """拉取 universe 全部ETF日K（当日磁盘缓存复用 backtest 的缓存目录）。
-    返回 {code: bars}，仅含有数据的。"""
+    返回 {code: bars}，仅含有数据的。缓存必须覆盖 start_date——低频虚拟盘
+    每晚只拉约500自然日，命中这种短缓存会让回测静默截断成短样本、报告
+    仍标全程（2026-09审计实发），短缓存视为未命中重拉。"""
     bars_by_code = {}
-    cached = cached_codes_today()
-    todo = [c for c in universe if c not in cached]
-    for code in [c for c in universe if c in cached]:
-        bars = read_kline_cache(code)
+    cached_codes_today()  # 清理过期缓存（命中判定由read的起点校验决定）
+    todo = []
+    for code in universe:
+        bars = read_kline_cache(code, start_date)
         if bars:
             bars_by_code[code] = bars
+        else:
+            todo.append(code)
     if todo:
         if not probe_etf_source():
             raise RuntimeError("腾讯qfq ETF数据源不可用，中止回测（快速失败）")
@@ -145,6 +149,12 @@ def load_etf_bars(universe, start_date, end_date):
                 code = futs[fut]
                 bars = fut.result()
                 if bars:
+                    # 拉回样本仍可能晚于起点（ETF上市晚/腾讯分页截断）：
+                    # 显式告警，静默短样本会伪装成全程（MA/mom预热不足）
+                    if bars[0]["date"][:10] > start_date:
+                        print(f"[lowfreq-bt] ⚠️ {code} {ETF_NAMES.get(code, '')} "
+                              f"K线起点 {bars[0]['date'][:10]} 晚于 {start_date}"
+                              f"——样本截断，MA/动量预热不足", flush=True)
                     save_kline_cache(code, bars)
                     bars_by_code[code] = bars
                 else:
@@ -636,7 +646,7 @@ def run_smallcap_backtest(cfg, start_year=None, end_year=None):
 
     # 3) 全市场K线 → 流式抽取月度截面（内存与股票总数无关）
     monthly_by_code = {}
-    cached = cached_codes_today()
+    cached_codes_today()  # 清理过期缓存（命中判定由read的起点校验决定）
     # 注意：todo 必须含已缓存代码——月度截面只在下方 as_completed 循环里抽取，
     # 把缓存命中者排除在外会导致它们整段从样本中消失。
     todo = [c["code"] for c in universe]
@@ -645,11 +655,18 @@ def run_smallcap_backtest(cfg, start_year=None, end_year=None):
     t0 = time.monotonic()
 
     def work(code):
-        bars = read_kline_cache(code) if code in cached else None
+        # 缓存必须覆盖回测起点，短缓存（如lowfreq虚拟盘只拉500天）视为未命中
+        bars = read_kline_cache(code, fetch_start)
         if bars is None:
             bars = fetch_stock_bars_sina(code, fetch_start,
                                         now_cn().strftime("%Y-%m-%d"))
             if bars is not None:
+                # 拉回样本仍短于起点（新浪datalen上限）：告警不拦，
+                # 静默短样本会伪装成全程
+                if bars[0]["date"][:10] > fetch_start:
+                    print(f"[smallcap-bt] ⚠️ {code} K线起点 "
+                          f"{bars[0]['date'][:10]} 晚于 {fetch_start}"
+                          f"——样本被截断", flush=True)
                 save_kline_cache(code, bars)
         return code, bars
 

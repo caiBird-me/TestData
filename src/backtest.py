@@ -322,12 +322,20 @@ def save_kline_cache(code, bars):
         pass  # 缓存写失败不影响回测本身
 
 
-def read_kline_cache(code):
-    """读取单只股票的当日缓存，失败返回 None"""
+def read_kline_cache(code, need_start=None):
+    """读取单只股票的当日缓存，失败返回 None。
+
+    need_start：要求的样本起点（YYYY-MM-DD）——缓存最早一根必须不晚于它。
+    当日缓存可能只覆盖近期（如 lowfreq 每晚只拉约500自然日），命中短缓存
+    会让回测静默截断成短样本、报告仍标全程，唯一线索是 console 一行
+    "640 个交易日"（2026-09审计实发：diag_boundary.py 即其现场证据）。
+    不满足覆盖起点视为未命中，重拉全量。
+    """
     try:
         js = json.loads((KLINE_CACHE_DIR / f"{code}.json").read_text(encoding="utf-8"))
         if js.get("fetched") == now_cn().strftime("%Y%m%d") and js.get("bars"):
-            return js["bars"]
+            if need_start is None or js["bars"][0]["date"][:10] <= need_start:
+                return js["bars"]
     except (ValueError, OSError):
         pass
     return None
@@ -400,8 +408,8 @@ def run_backtest(cfg, start_year=None, end_year=None):
         raise RuntimeError("新浪与腾讯K线源均不可用，中止回测（快速失败，"
                            "不空转重试）")
 
-    cached_codes = cached_codes_today()
-    todo = [c for c in codes if c not in cached_codes]
+    cached_codes_today()  # 清理过期缓存文件（当日命中与否由read的起点校验决定）
+    todo = list(codes)    # 不按缓存预分流：短缓存（如lowfreq只拉500天）也要重拉
     breaker = _CircuitBreaker()
     results = []
     n_detected = 0
@@ -411,13 +419,17 @@ def run_backtest(cfg, start_year=None, end_year=None):
     t0 = time.monotonic()
 
     def work(code):
-        """线程worker：缓存优先 → 拉K线 → 缓存落盘。"""
-        bars = None
-        if code in cached_codes:
-            bars = read_kline_cache(code)
+        """线程worker：缓存优先（含样本起点校验）→ 拉K线 → 缓存落盘。"""
+        bars = read_kline_cache(code, fetch_start)
         if bars is None:
             bars = fetch_one(code, fetch_start, fetch_end)
             if bars is not None:
+                # 拉回的样本仍可能短于回测起点（新浪datalen上限/腾讯分页
+                # early-break）：不拦运行但显式告警，静默短样本会伪装成全程
+                if bars[0]["date"][:10] > fetch_start:
+                    print(f"[backtest] ⚠️ {code} K线起点 {bars[0]['date'][:10]} "
+                          f"晚于回测起点 {fetch_start}——样本被截断，注意核对",
+                          flush=True)
                 save_kline_cache(code, bars)
         return code, bars
 
@@ -448,19 +460,6 @@ def run_backtest(cfg, start_year=None, end_year=None):
                       f" {rate:.1f}只/秒，预计还需{eta//60}分{eta%60}秒", flush=True)
             if done % 1000 == 0:
                 gc.collect()
-
-    # 缓存命中的部分也要扫事件（当日重跑场景）
-    for code in codes:
-        if code in cached_codes:
-            bars = read_kline_cache(code)
-            if bars:
-                r_list, exdiv, detected = scan_stock_events(
-                    code, bars, start_year, end_year)
-                n_detected += detected
-                n_exdiv_miss += exdiv
-                results.extend(r_list)
-            else:
-                failed_codes.append(code)
 
     print(f"[backtest] 完成：检测{n_detected}个涨停事件（另有{n_exdiv_miss}个"
           f"疑似除权漏检），成交{len(results)}笔，失败{len(failed_codes)}只", flush=True)

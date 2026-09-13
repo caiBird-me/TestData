@@ -486,6 +486,34 @@ class TestDoubleEntryAudit(unittest.TestCase):
             path.unlink(missing_ok=True)
 
 
+class TestKlineCacheRangeCheck(unittest.TestCase):
+    """K线缓存必须覆盖回测起点：短缓存（如lowfreq虚拟盘只拉500天）命中
+    会让回测静默截断成短样本、报告仍标全程（2026-09审计实发）"""
+
+    def test_short_cache_treated_as_miss(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        import backtest as bt
+        tmp = Path(tempfile.mkdtemp())
+        old = bt.KLINE_CACHE_DIR
+        bt.KLINE_CACHE_DIR = tmp
+        try:
+            today = bt.now_cn().strftime("%Y%m%d")
+            bar = {"date": "2024-06-03", "open": 1, "close": 1, "high": 1,
+                   "low": 1, "volume": 1, "amount": 1}
+            (tmp / "600000.json").write_text(json.dumps(
+                {"fetched": today, "bars": [bar]}), encoding="utf-8")
+            # 缓存起点2024-06-03 晚于需求起点2024-01-01 → 视为未命中重拉
+            self.assertIsNone(bt.read_kline_cache("600000", "2024-01-01"))
+            # 无起点要求（当日缓存本身有效）或起点在覆盖内 → 命中
+            self.assertIsNotNone(bt.read_kline_cache("600000"))
+            self.assertIsNotNone(bt.read_kline_cache("600000", "2024-06-03"))
+            self.assertIsNotNone(bt.read_kline_cache("600000", "2025-01-01"))
+        finally:
+            bt.KLINE_CACHE_DIR = old
+
+
 class TestRegisterOrders(unittest.TestCase):
     """低频挂单登记：对账（矛盾挂单作废）+ 去重（防复牌双倍成交）"""
 
