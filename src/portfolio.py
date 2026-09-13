@@ -98,6 +98,22 @@ class Portfolio:
         d.setdefault("pending_trades", [])       # 晚间登记、次日晚间开盘价补账
         d.setdefault("rebalance_state", {})      # S2 调仓计数 {last_date, count}
         d.setdefault("nav_history", [])          # 每日净值 [{date, value}]
+        # 双通道对账的流水通道（append-only）：买入记 invested，卖出记
+        # net/pnl——audit() 从这里独立重算现金/持仓/已实现盈亏
+        d.setdefault("trades", [])
+        # 迁移：账本已有持仓但没有流水（trades 字段晚于账本引入）——用持仓
+        # 自带的买入信息播种等价 buy 记录。只对空流水+有持仓做一次，
+        # 播种后流水非空，不会重复播种
+        if not d["trades"] and d["positions"]:
+            for p in d["positions"]:
+                d["trades"].append({
+                    "date": p.get("buy_date"), "code": p["code"],
+                    "action": "buy", "shares": p["shares"],
+                    "price": p["buy_price"], "amount": p["amount"],
+                    "fee": p.get("buy_cost", 0),
+                    "invested": round(p["amount"] + p.get("buy_cost", 0), 2),
+                    "seeded": True,
+                })
         self.data = d
         self.signals = _load(self.signals_path, [])
         self.costs = {**self.DEFAULT_COSTS, **(costs or {})}
@@ -136,6 +152,12 @@ class Portfolio:
             "board": board, "kind": kind, "stop_loss": stop_loss,
         }
         self.data["positions"].append(pos)
+        # 双通道对账：买入流水（invested = amount + 佣金，与sell口径闭环）
+        self.data["trades"].append({
+            "date": pos["buy_date"], "code": code, "action": "buy",
+            "shares": shares, "price": price, "amount": amount, "fee": fee,
+            "invested": round(amount + fee, 2),
+        })
         return pos
 
     def sell(self, code, price, reason=""):
@@ -151,6 +173,13 @@ class Portfolio:
                 self.data["cash"] = round(self.data["cash"] + net, 2)
                 self.data["total_costs"] = round(self.data["total_costs"] + fee, 2)
                 self.data["positions"].pop(i)
+                # 双通道对账：卖出流水（net/pnl 可独立重算现金与已实现盈亏）
+                self.data["trades"].append({
+                    "date": now_cn().strftime("%Y-%m-%d"), "code": code,
+                    "action": "sell", "shares": p["shares"], "price": price,
+                    "gross": gross, "fee": fee, "net": net,
+                    "invested": invested, "pnl": pnl,
+                })
                 self._settle_signal(code, price, pnl, pnl_pct, reason)
                 return pnl, pnl_pct
         return None
@@ -260,7 +289,51 @@ class Portfolio:
             mv += prices.get(p["code"], p["buy_price"]) * p["shares"]
         return round(mv, 2)
 
+    def audit(self, tolerance=0.05):
+        """双通道对账（CLAUDE.md 不变量）：从 append-only trades 独立重算
+        现金、持仓股数与已实现盈亏，与账本状态比对；再验恒等式
+        现金 + 持仓成本 = 初始资金 + 已实现盈亏。
+        不一致抛异常——挂在 save() 里，宁可当晚红掉也不带错账继续跑、
+        不把错账提交回仓库。tolerance 容纳逐笔 round(.,2) 的累积误差。
+        已知边界：trades 与 cash 由同一套 buy/sell 算式双写，本对账只抓
+        "状态与流水分叉"（中途崩溃/手工改账/序列化 bug），抓不住费用公式
+        本身的错（公式错则两边同错、恒等式照过）；total_costs 不与流水
+        fee 累加对账（打板等老账本的流水早于字段引入，历史卖出无记录）。"""
+        initial = self.data.get("initial_capital")
+        if initial is None:
+            return
+        cash, held, realized = initial, {}, 0.0
+        for t in self.data.get("trades") or []:
+            if t["action"] == "buy":
+                cash -= t["invested"]
+                held[t["code"]] = held.get(t["code"], 0) + t["shares"]
+            else:  # sell
+                cash += t["net"]
+                held[t["code"]] = held.get(t["code"], 0) - t["shares"]
+                realized += t["pnl"]
+        errs = []
+        if abs(cash - self.data["cash"]) > tolerance:
+            errs.append(f"现金: 流水重算 {cash:.2f} vs 账本 {self.data['cash']:.2f}")
+        pos_shares = {}
+        for p in self.data["positions"]:
+            pos_shares[p["code"]] = pos_shares.get(p["code"], 0) + p["shares"]
+        for code in sorted(set(held) | set(pos_shares)):
+            if held.get(code, 0) != pos_shares.get(code, 0):
+                errs.append(f"{code} 股数: 流线 {held.get(code, 0)}"
+                            f" vs 持仓 {pos_shares.get(code, 0)}")
+        invested_held = sum(p["amount"] + p.get("buy_cost", 0)
+                            for p in self.data["positions"])
+        lhs = self.data["cash"] + invested_held
+        rhs = initial + realized
+        if abs(lhs - rhs) > tolerance:
+            errs.append(f"恒等式: cash+持仓成本 {lhs:.2f} != 初始+已实现 {rhs:.2f}")
+        if errs:
+            raise RuntimeError(
+                f"[{self.path.name}] 双通道对账失败（拒绝保存）: "
+                + "; ".join(errs))
+
     def save(self):
+        self.audit()
         _save(self.path, self.data)
         _save(self.signals_path, self.signals)
 

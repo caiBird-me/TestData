@@ -439,6 +439,53 @@ class TestPendingOrderExpiry(unittest.TestCase):
         self.assertEqual(len(book.calls), 1)
 
 
+class TestDoubleEntryAudit(unittest.TestCase):
+    """双通道对账：trades流水独立重算cash/持仓/盈亏，不一致拒绝save"""
+
+    def test_roundtrip_and_tamper_detection(self):
+        from portfolio import Portfolio
+        p = Portfolio(3000, book="unit_tmp_audit")
+        p.buy("600000", "测试", 10.0, 100, date_str="2026-09-01")
+        p.sell("600000", 10.0)
+        p.audit()                                   # 一轮买卖后必须自洽
+        p.buy("600001", "测试", 5.0, 200, date_str="2026-09-02")
+        p.audit()
+        # 篡改现金：恒等式与流水重算都会抓到
+        p.data["cash"] += 100.0
+        with self.assertRaises(RuntimeError):
+            p.audit()
+        p.data["cash"] -= 100.0
+        # 幽灵持仓：没有对应流水，股数对不上
+        p.data["positions"].append(
+            {"code": "600099", "name": "幽灵仓", "shares": 100, "amount": 1000.0,
+             "buy_cost": 5.0, "buy_price": 10.0, "buy_date": "2026-09-01"})
+        with self.assertRaises(RuntimeError):
+            p.audit()
+
+    def test_seed_from_positions_migration(self):
+        # 旧账本有持仓无流水：__init__播种等价buy记录，audit可独立重算
+        from portfolio import Portfolio, _save, DATA_DIR
+        path = DATA_DIR / "books" / "unit_tmp_seed.json"
+        try:
+            _save(path, {
+                "cash": 450.0, "initial_capital": 3000, "total_costs": 10.0,
+                "positions": [
+                    {"code": "000930", "name": "中粮科技", "buy_price": 6.9,
+                     "shares": 200, "amount": 1380.0, "buy_cost": 5.0,
+                     "buy_date": "2026-09-10", "stop_loss": 6.21},
+                    {"code": "002295", "name": "精艺股份", "buy_price": 11.6,
+                     "shares": 100, "amount": 1160.0, "buy_cost": 5.0,
+                     "buy_date": "2026-09-10", "stop_loss": 11.22}]})
+            p = Portfolio(3000, book="unit_tmp_seed")
+            self.assertEqual(len(p.data["trades"]), 2)   # 播种2笔buy
+            self.assertTrue(all(t.get("seeded") for t in p.data["trades"]))
+            p.audit()                                    # 450+2550=3000 ✓
+            p.sell("000930", 5.88, "止损")                # 播种后再卖仍自洽
+            p.audit()
+        finally:
+            path.unlink(missing_ok=True)
+
+
 class TestRegisterOrders(unittest.TestCase):
     """低频挂单登记：对账（矛盾挂单作废）+ 去重（防复牌双倍成交）"""
 
