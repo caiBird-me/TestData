@@ -306,8 +306,11 @@ def fetch_first_minute(code, date_str=None):
 
     成交可行性建模用：竞价价只是虚拟撮合价，09:31 分钟K的 open/high/low 才是
     开盘后真实可成交的价格区间。返回 {open,high,low,close} 或 None。
+    lmt=241（一整个交易日的分钟K根数）：GitHub 定时任务延迟几分钟是常态，
+    窗口只留10根的话 09:31 那根会被挤出窗口——静默丢掉成交可行性校验与
+    滑点修正，虚拟盘系统性偏乐观（从不报警的方向，2026-09审计发现）。
     """
-    k = fetch_kline(code, days=10, klt=1)
+    k = fetch_kline(code, days=241, klt=1)
     if not k:
         return None
     target = (date_str or now_cn().strftime("%Y-%m-%d"))
