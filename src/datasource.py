@@ -323,7 +323,9 @@ def is_today_trading_day():
     """判断今天是否交易日（morning 盘前用，日K此时还停留在昨天无法区分）。
 
     原理：上证指数行情时间戳 f86 在交易日竞价完成后（09:25）会更新为当日；
-    非交易日返回的是上一交易日收盘时间。时间戳拉不到时保守视为交易日。
+    非交易日返回的是上一交易日收盘时间。时间戳拉不到时抛异常（fail-loud）：
+    拉不到时"视为交易日"是把假日误当交易日跑、旧价入账的乐观方向静默 bug
+    （2026-09审计发现）——宁可红掉让告警接管，不猜。
     """
     data = _get(
         "https://push2.eastmoney.com/api/qt/stock/get",
@@ -332,7 +334,7 @@ def is_today_trading_day():
     )
     ts = int((data or {}).get("f86") or 0)
     if ts <= 0:
-        return True
+        raise RuntimeError("无法确认交易日（上证指数f86时间戳拉取失败）")
     quote_day = datetime.fromtimestamp(ts, CN_TZ).strftime("%Y%m%d")
     return quote_day == now_cn().strftime("%Y%m%d")
 
@@ -425,6 +427,8 @@ def fetch_zt_pool(date_str=None):
     """
     if not date_str:
         date_str = get_last_trade_date()
+    if not date_str:
+        return []  # 连"最近交易日"都无法确认——不猜日期，按缺数据降级
     data = _get(
         "https://push2ex.eastmoney.com/getTopicZTPool",
         {
@@ -531,11 +535,11 @@ def _get_dc(params, retries=3, timeout=15):
 
 
 def _ltb_date(date_str):
-    """龙虎榜日期参数：'YYYY-MM-DD'（默认最近交易日）"""
+    """龙虎榜日期参数：'YYYY-MM-DD'（默认最近交易日）；无法确认返回 None"""
     if date_str:
         return date_str
     d = get_last_trade_date()
-    return f"{d[:4]}-{d[4:6]}-{d[6:]}" if d else now_cn().strftime("%Y-%m-%d")
+    return f"{d[:4]}-{d[4:6]}-{d[6:]}" if d else None
 
 
 def fetch_ltb_pool(date_str=None):
@@ -546,6 +550,8 @@ def fetch_ltb_pool(date_str=None):
     上榜股约60-100只/日——净买额/席位是打板次日溢价的核心领先指标。
     """
     date = _ltb_date(date_str)
+    if not date:
+        return {}  # 无法确认交易日——不猜日期，按缺数据降级
     pool = {}
     page = 1
     while page <= 5:  # 100只/页×5页，覆盖单日全部榜单
@@ -581,6 +587,8 @@ def fetch_ltb_seats(code, date_str=None):
     返回 {buy: [{name,buy,sell,net}], sell: [...]}；失败返回 {}。
     """
     date = _ltb_date(date_str)
+    if not date:
+        return {}  # 无法确认交易日——不拼 'None' 进 filter（空结果假装有数据）
     out = {}
     for rpt, side in (("RPT_BILLBOARD_DAILYDETAILSBUY", "buy"),
                       ("RPT_BILLBOARD_DAILYDETAILSSELL", "sell")):
@@ -722,11 +730,14 @@ def _index_recent_dates(n=5):
 
 
 def get_last_trade_date():
-    """用沪深300指数日K推断最近交易日，返回 YYYYMMDD 字符串"""
+    """用沪深300指数日K推断最近交易日，返回 YYYYMMDD 字符串；失败返回 None。
+
+    拉不到时返回"今天"是 fail-open：假日接口超时会把假日当交易日照跑、
+    旧价入账（2026-09审计发现）。调用方对 None 必须 fail-loud。"""
     dates = _index_recent_dates()
     if dates:
         return dates[-1]
-    return now_cn().strftime("%Y%m%d")
+    return None
 
 
 def get_prev_trade_date():

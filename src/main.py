@@ -53,6 +53,9 @@ def run_evening(cfg):
     if os.environ.get("STOCK_FORCE") != "1":
         today_cn = now_cn().strftime("%Y%m%d")
         last_trade = ds.get_last_trade_date()
+        if last_trade is None:
+            # fail-loud：拉不到交易日历时，"当作交易日跑"会把假日旧价入账
+            raise RuntimeError("[evening] 无法确认最近交易日（指数日K拉取失败）")
         if last_trade != today_cn:
             print(f"[evening] 今日非交易日（最近交易日 {last_trade}），跳过")
             return 0
@@ -211,6 +214,10 @@ def run_morning(cfg):
     # 昨晚的信号 signal_date 必须等于最近一个已收盘交易日（今晨盘前日K最后一根）
     # 注意格式：signal_date 是 "YYYY-MM-DD"，日K返回 "YYYYMMDD"，需归一化后比较
     kline_last = ds.get_kline_last_date()
+    if kline_last is None:
+        # fail-loud：拉不到最近交易日时，信号过期检查与晋级率日期校验
+        # 全部失效（旧信号/旧晋级率照常参与买入=乐观侧静默 bug），宁可红掉
+        raise RuntimeError("[morning] 无法确认最近已收盘交易日（指数日K拉取失败）")
     expired = []
     if kline_last:
         expired = [s for s in pending
@@ -283,6 +290,14 @@ def run_morning(cfg):
         print(f"[morning] 市场情绪: 昨日{lu_count}只涨停股今日平均 {sentiment:+.2f}%")
 
     promo_rate = (sent_data or {}).get("promotion_rate") if sent_data else None
+    # 日期校验：sentiment.json 必须是最近一个已收盘交易日的读数——
+    # evening 连挂几天时，几天前的旧晋级率会被当作"昨日"参与买入开关，
+    # 无任何陈旧标记（2026-09审计发现）
+    if promo_rate is not None:
+        sent_day = str((sent_data or {}).get("date", "")).replace("-", "")
+        if sent_day != str(kline_last).replace("-", ""):
+            print(f"[morning] 晋级率读数过期（{sent_day} != {kline_last}），弃用")
+            promo_rate = None
     promo_bad = promo_rate is not None and \
         promo_rate < cfg["strategy"].get("promotion_rate_min", 0.15)
     if promo_rate is not None:
@@ -531,7 +546,10 @@ def run_lowfreq(cfg):
     date_str = now_cn().strftime("%Y-%m-%d")
     if os.environ.get("STOCK_FORCE") != "1":
         today_cn = now_cn().strftime("%Y%m%d")
-        if ds.get_last_trade_date() != today_cn:
+        last_trade = ds.get_last_trade_date()
+        if last_trade is None:
+            raise RuntimeError("[lowfreq] 无法确认最近交易日（指数日K拉取失败）")
+        if last_trade != today_cn:
             print("[lowfreq] 今日非交易日，跳过")
             return 0
 
