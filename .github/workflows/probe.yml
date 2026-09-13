@@ -22,7 +22,7 @@ jobs:
           PYTHONUNBUFFERED: 1
         run: |
           python - <<'EOF'
-          import time, requests
+          import sys, time, requests
           from concurrent.futures import ThreadPoolExecutor
 
           # 确定存在的大盘股代码（避免把退市代码误判为网络失败）
@@ -97,10 +97,118 @@ jobs:
                   ks = (r.json().get("data") or {}).get("klines") or []
                   print(f"[push2his 指数日K] ok, 最近交易日: "
                         f"{[k.split(',')[0] for k in ks]}")
+                  return ks[-1].split(",")[0].replace("-", "") if ks else None
               except Exception as e:
                   print(f"[push2his 指数日K] 失败: {e}")
+                  return None
 
+          def probe_production(last_trade):
+              """生产链路接口探针（与 src/datasource.py 同参数实测）。
+              失败（含 HTTP 通但字段全缺失——字段口径漂移）计入 FAILS，
+              结尾 sys.exit(1) 让 workflow 变红：探针不红就没有存在意义。"""
+              UT = "bd1d9ddb04089700cf9c27f6f7426281"
+              FIELDS = ("f2,f3,f8,f10,f12,f14,f15,f16,f17,f18,"
+                        "f20,f21,f26,f62,f100,f128")
+              FS_ASHARE = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
+              FS_EXBJ = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+              HEADERS = {"User-Agent":
+                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                         "AppleWebKit/537.36 (KHTML, like Gecko) "
+                         "Chrome/125.0 Safari/537.36",
+                         "Referer": "https://quote.eastmoney.com/"}
+
+              def get(url, params):
+                  return requests.get(url, params=params, headers=HEADERS,
+                                      timeout=(5, 15)).json().get("data")
+
+              # 1) clist 涨幅榜（打板候选池）——顺带验字段口径：f3 为 '-' 的
+              # 比例过高说明字段漂了（_normalize_stock 会静默剔除）
+              try:
+                  diff = get("https://push2.eastmoney.com/api/qt/clist/get",
+                             {"pn": 1, "pz": 100, "po": 1, "np": 1, "ut": UT,
+                              "fltt": 2, "invt": 2, "fid": "f3", "fs": FS_ASHARE,
+                              "fields": FIELDS}) .get("diff") or []
+                  dash = sum(1 for s in diff if s.get("f3") == "-")
+                  print(f"[push2 clist 涨幅榜] ok, {len(diff)}条, "
+                        f"top={diff[0].get('f14') if diff else '-'} "
+                        f"{diff[0].get('f3') if diff else '-'}%, "
+                        f"字段缺失 {dash}/{len(diff)}")
+                  if len(diff) < 50 or dash > len(diff) * 0.5:
+                      FAILS.append(f"clist 涨幅榜: 数据{len(diff)}条/字段缺失{dash}")
+              except Exception as e:
+                  print(f"[push2 clist 涨幅榜] 失败: {e}")
+                  FAILS.append(f"clist 涨幅榜: {e}")
+              # 2) clist 最小市值升序（S3 小市值选股）
+              try:
+                  diff = get("https://push2.eastmoney.com/api/qt/clist/get",
+                             {"pn": 1, "pz": 50, "po": 0, "np": 1, "ut": UT,
+                              "fltt": 2, "invt": 2, "fid": "f21", "fs": FS_EXBJ,
+                              "fields": FIELDS}).get("diff") or []
+                  caps = [s.get("f21") for s in diff if s.get("f21") not in (None, "-")]
+                  if caps:
+                      print(f"[push2 clist 最小市值] ok, {len(diff)}条, "
+                            f"最小流通市值 {float(caps[0])/1e8:.2f}亿")
+                  else:
+                      print(f"[push2 clist 最小市值] HTTP通但f21全缺失: {len(diff)}条")
+                      FAILS.append("clist 最小市值: f21 字段全缺失")
+              except Exception as e:
+                  print(f"[push2 clist 最小市值] 失败: {e}")
+                  FAILS.append(f"clist 最小市值: {e}")
+              # 3) ulist.np 批量快照（早间竞价确认/持仓定价）
+              try:
+                  diff = get("https://push2.eastmoney.com/api/qt/ulist.np/get",
+                             {"ut": UT, "fltt": 2, "invt": 2, "fields": FIELDS,
+                              "secids": "1.600519,0.000001,1.000300"}).get("diff") or []
+                  if diff:
+                      print(f"[push2 ulist.np 快照] ok, {len(diff)}/3, "
+                            f"样例 {diff[0].get('f14')} 现价{diff[0].get('f2')}")
+                  else:
+                      print("[push2 ulist.np 快照] HTTP通但无数据")
+                      FAILS.append("ulist.np 快照: 无数据")
+              except Exception as e:
+                  print(f"[push2 ulist.np 快照] 失败: {e}")
+                  FAILS.append(f"ulist.np 快照: {e}")
+              # 4) stock/get f86（交易日判定——CI 假日守卫依赖）
+              try:
+                  from datetime import datetime, timezone, timedelta
+                  ts = int(get("https://push2.eastmoney.com/api/qt/stock/get",
+                               {"secid": "1.000001", "fields": "f86",
+                                "ut": UT, "invt": 2, "fltt": 2}).get("f86") or 0)
+                  day = (datetime.fromtimestamp(ts, timezone(timedelta(hours=8)))
+                         .strftime("%Y-%m-%d %H:%M")) if ts > 0 else "无效"
+                  print(f"[push2 stock/get f86] ok, 行情时间戳: {day}")
+                  if ts <= 0:
+                      FAILS.append("stock/get f86: 时间戳无效")
+              except Exception as e:
+                  print(f"[push2 stock/get f86] 失败: {e}")
+                  FAILS.append(f"stock/get f86: {e}")
+              # 5) push2ex 涨停池（情绪温度计/晋级率）
+              try:
+                  if not last_trade:
+                      FAILS.append("涨停池: 上游指数日K失败导致跳过")
+                  else:
+                      pool = get("https://push2ex.eastmoney.com/getTopicZTPool",
+                                 {"ut": "7eea3edcaed734bea9cbfc24409ed989",
+                                  "dpt": "wz.ztzt", "Pageindex": 0,
+                                  "pagesize": 1000, "sort": "fbt:asc",
+                                  "date": last_trade}).get("pool")
+                      if pool is None:
+                          raise ValueError("pool 字段缺失（接口结构漂移）")
+                      print(f"[push2ex 涨停池 {last_trade}] ok, {len(pool)}只"
+                            + (f", 最高连板 {max(s.get('lbc', 1) for s in pool)}板"
+                               if pool else "（空池）"))
+              except Exception as e:
+                  print(f"[push2ex 涨停池] 失败: {e}")
+                  FAILS.append(f"涨停池: {e}")
+
+          FAILS = []
           probe_sina()
           probe_tencent_serial()
-          probe_ltb()
+          probe_production(probe_ltb())
+          if FAILS:
+              print(f"\n❌ {len(FAILS)} 个生产接口探针失败:")
+              for f in FAILS:
+                  print(f"  - {f}")
+              sys.exit(1)
+          print("\n✅ 生产接口探针全部通过")
           EOF
