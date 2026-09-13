@@ -662,12 +662,11 @@ def run_lowfreq(cfg):
 
         reb_days = sr.get("rebalance_days", 20)
         reb = book.data.setdefault("rebalance_state", {})
-        # 同日重跑（CI重试/手动补跑）不双计调仓天数——挂单有 date>=今日
-        # 跳过与去重双保险，计数若也重跑会悄悄提前调仓
-        if reb.get("last_run") != date_str:
-            reb["count"] = reb.get("count", 0) + 1
-            reb["last_run"] = date_str
-        count = reb.get("count", 0)
+        # 调仓计数从交易日历派生（上次调仓日 < d <= 今日的交易日数）：
+        # 同日重跑天然幂等（CI重试不双计），CI停摆漏掉的交易日也如实计入
+        # ——对齐回测"每N个交易日"的节奏，而不是"每N个run日"
+        count = (sum(1 for d in cal if reb["last_date"] < d <= date_str)
+                if reb.get("last_date") else reb.get("count", 0))
         signals = []
         if is_rebalance_due(reb_days, reb.get("last_date"), count):
             targets, _ = rotation_targets(rot_bars, date_str, sr.get("mom_window", 20),
@@ -718,10 +717,9 @@ def run_lowfreq(cfg):
         reb = book.data.setdefault("rebalance_state", {})
         gstate = book.data.setdefault("gate_state", {"gated_out": False})
         reb_days = sr.get("rebalance_days", 20)
-        if reb.get("last_run") != date_str:
-            reb["count"] = reb.get("count", 0) + 1
-            reb["last_run"] = date_str
-        count = reb.get("count", 0)
+        # 同 S2 真身：计数从交易日历派生（幂等 + 停摆天数如实计入）
+        count = (sum(1 for d in cal if reb["last_date"] < d <= date_str)
+                 if reb.get("last_date") else reb.get("count", 0))
         held = set(book.held_codes())
         signals = []
 
@@ -811,7 +809,20 @@ def run_lowfreq(cfg):
         book.data["pending_trades"] = rest
 
         signals = []
-        if prev_trade and is_first_trade_day_of_month(prev_trade, date_str):
+        # 月初判定记账月份（幂等）：原判定只看"相邻两交易日跨月"，同日重跑
+        # 会重复调仓。改为额外要求本月未调过仓（smallcap_state.last_rebalance_month），
+        # 同日重跑/补跑直接跳过。CI 停摆错过月初当天时本月不补调（口径与
+        # 回测一致：回测按日历必达，虚拟盘错过即缺仓，不猜）
+        sm = book.data.setdefault("smallcap_state", {})
+        if "last_rebalance_month" not in sm and not (
+                prev_trade and is_first_trade_day_of_month(prev_trade, date_str)):
+            # 迁移：S3 2026-09-07 启动晚于 9月窗口、从未买过，按当前月
+            # 记账即诚实（不追溯调仓）。月初交易日不迁移——否则首次部署
+            # 恰逢月初会把当月唯一调仓窗口静默吞掉还谎报"已调仓"
+            sm["last_rebalance_month"] = date_str[:7]
+        month_due = (prev_trade and is_first_trade_day_of_month(prev_trade, date_str)
+                     and sm.get("last_rebalance_month") != date_str[:7])
+        if month_due:
             # 升序前60只里ST/次新密集（实测前30仅剩5只合格，贴线），
             # 多拉一倍给过滤函数留余量
             stocks = ds.fetch_smallest_caps(max_count=60)
@@ -826,6 +837,9 @@ def run_lowfreq(cfg):
             added = _register_orders(book, sell_codes, buys, True, date_str)
             signals = [f"{'调出' if a == 'sell' else '调入'} {n}"
                        for a, _, n in added]
+            sm["last_rebalance_month"] = date_str[:7]
+        elif prev_trade and is_first_trade_day_of_month(prev_trade, date_str):
+            signals = [f"月度策略：{date_str[:7]} 已调仓（幂等跳过重跑）"]
         else:
             signals = ["月度策略：非月初交易日，持仓不动"]
 
